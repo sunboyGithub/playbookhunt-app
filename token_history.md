@@ -92,6 +92,22 @@ needed one `diff`.
 
 **Tokens:** unavailable.
 
+Unlike P0, the work here was mostly real output: a 64-file commit. The session
+ran the four acceptance checks repeatedly rather than once, because three
+defects surfaced only at runtime and each needed a fix-and-recheck cycle:
+
+1. Escaped quotes in a generated placeholder route broke `tsc`.
+2. Generated `PageProps`/`LayoutProps` types do not exist until `next typegen`
+   runs, so `tsc --noEmit` failed. Replaced with explicit prop types.
+3. **Blank optional env values took down every route.** `.env.local` copied
+   from `.env.example` has `RESEND_API_KEY=` and friends, which the runtime
+   surfaces as empty strings. `z.string().min(1).optional()` does not skip an
+   empty string, so validation threw and the site 500'd. Fixed by treating blank
+   values as absent, with two regression tests added.
+
+Also spent effort on two Next.js 16 defaults that fight the brief: the
+auto-generated `AGENTS.md` block, and the `middleware` → `proxy` rename.
+
 ---
 
 ## Maintaining this file

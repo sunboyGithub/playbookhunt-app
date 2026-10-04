@@ -82,3 +82,95 @@ Nothing is served yet — no dev server was started at P0. Useful things to open
 - **Git topology is decided but not acted on.** The app is its own repository;
   the parent `playbookhunt/` spec package is untouched and has one unpushed
   commit that deliberately excludes a local credential file.
+
+---
+
+## P1 — Scaffold the app
+
+**Status:** complete. Commit `c51127d`, 64 files. Supersedes the P0 note about
+unverified toolchain versions — Node 26.10.0 and pnpm 12.9.1 both work.
+
+### What was built
+
+- **Next.js 16.3.8** — App Router, Turbopack, TypeScript strict, `src/`.
+  Scaffolded via `create-next-app` into a temp directory and merged, because
+  `create-next-app` refuses a non-empty directory.
+- **Tailwind v4 + shadcn/ui** (radix base). All 14 required components
+  installed: button, card, badge, input, dialog, sheet, tabs, select, checkbox,
+  dropdown-menu, sonner, skeleton, avatar, tooltip, command. `textarea` and
+  `input-group` came in as transitive dependencies.
+- **Design tokens** in [src/app/globals.css](../src/app/globals.css) exactly as
+  `AGENTS.md` specifies — background `#FAF9F6`, card white, border `#E7E5E0`,
+  accent `#FF5A1F`, worked `#16A34A` / partly `#F59E0B` / didn't `#DC2626`, the
+  Muse blue family (`#2A66DE`, soft `#E8EFFC`, dark `#1D4FB8`, line `#C3D4F5`),
+  the Meta-blue avatar ring `#0081FB`, and 12/16px radii. Light theme only; no
+  `.dark` block. Geist and Geist Mono via `next/font`.
+- **Supabase SSR clients** — browser, server, admin (service-role), and session
+  refresh middleware. `SUPABASE_SERVICE_ROLE_KEY` is server-only and the admin
+  client refuses to build without it.
+- **Env validation** — `src/lib/env.ts` fails at startup and names every missing
+  key. Only the three Supabase/site keys are required; Resend, PostHog, Sentry
+  and the service-role key stay optional until their prompt.
+- **App shell** — header (two-tone `Playbook`+`Hunt` wordmark, nav, `⌘K` search
+  trigger, Create, Report, Sign in, and a mobile menu) and the shared compact
+  footer used on every page.
+- **17 placeholder routes** — every route P1 names, plus `/privacy` and
+  `/terms`, which the footer links to.
+- **Tooling** — ESLint, Prettier, Vitest, Playwright, and the
+  `dev`/`build`/`start`/`lint`/`typecheck`/`test`/`test:e2e` scripts.
+  `README.md` documents setup; `.env.example` lists all seven variables.
+- **`.env.local`** generated from the running local Supabase stack rather than
+  pasted, so the keys never entered a transcript. Gitignored.
+
+### Checks and results
+
+| Check | Result |
+|---|---|
+| `pnpm typecheck` | **Pass** — no errors |
+| `pnpm lint` | **Pass** — no findings |
+| `pnpm test` | **Pass** — 7/7 across 1 file |
+| `pnpm test:e2e` | **Pass** — 4/4, desktop + iPhone 13 (390x844) |
+| `pnpm build` | **Pass** — 17 routes, Proxy registered |
+| `pnpm dev` | **Pass** — HTTP 200 on `/` |
+| Secret scan of the commit | `.env.local`, `.next/`, `node_modules/` all excluded; no key values staged |
+
+### What to inspect in the browser
+
+Dev server is running at **<http://localhost:3000>**.
+
+- **Homepage** — background should be `#FAF9F6`, not white. "Hunt" in the
+  wordmark must be orange; the word "Muse" in the H1 must be Muse blue. That
+  pair is the quickest way to confirm the tokens landed.
+- **Footer** — five links. Resize to ~390px wide: it should become three
+  columns across two rows, with no tagline and generous tap targets.
+- **Header at 390px** — nav collapses to a search icon and `☰`. Open the menu:
+  labels stay descriptive ("+ Create a playbook", not "+").
+- **<http://localhost:3000/p/some-slug>** — a dynamic route renders
+  "Playbook: some-slug", which proves `params` await correctly.
+- **<http://localhost:54323>** — Supabase Studio, still an empty schema (P1
+  creates no database objects).
+
+### Blocks and unverified criteria
+
+- **Nothing is verified visually yet.** Automated checks confirm the shell
+  renders and tokens compile, but no one has confirmed the colours *look*
+  right against the design frames. That review is outstanding.
+- **`pnpm dev` was verified in development mode only.** The production build
+  succeeds, but P1's acceptance criterion is specifically about `pnpm dev`.
+- **No placeholder route has a real page**, by design — that is P4–P12d.
+- **Design tokens are inferred where the brief is silent.** `AGENTS.md` does not
+  specify body text colour, muted greys, or the focus ring. Values were chosen
+  to match the warm `#FAF9F6` surface. Revisit if a frame disagrees.
+- **⌘K, the avatar menu and sign-in are inert.** The search trigger is a
+  non-functional button and "Sign in" is a plain link, because auth and the
+  palette are P8 and P4.
+- **Two Next.js 16 behaviours needed intervention.** `next dev` appends a
+  generated agent-rules block to `AGENTS.md`, which would break P0's verbatim
+  requirement, so `agentRules: false` is set. The `middleware` file convention
+  is deprecated in favour of `proxy`, so the file is [src/proxy.ts](../src/proxy.ts).
+- **Playwright needs WebKit as well as Chromium.** The iPhone 13 device
+  descriptor uses WebKit, so `pnpm exec playwright install chromium webkit` is
+  required in CI. Noted in the README.
+- **`docs/` was not modified**, per the prompt. Brand and template copies were
+  already present from P0.
+

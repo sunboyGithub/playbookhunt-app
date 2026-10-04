@@ -45,3 +45,57 @@ test("renders with no console errors or hydration warnings", async ({ page }) =>
 
   expect(problems).toEqual([]);
 });
+
+test("shows early evidence, not a percentage, with no reports", async ({ page }) => {
+  await page.goto("/");
+
+  // The seeded catalogue has three playbooks and no reports. AGENTS.md forbids a
+  // success percentage below 20 reports, so the page must be showing "Early"
+  // wording and no percentage at all — this fails loudly if a threshold is ever
+  // bypassed rather than quietly rendering "0% worked".
+  await expect(page.getByText(/Early · \d+ reports/).first()).toBeVisible();
+  await expect(page.getByText(/^\d+% worked$/).first()).toHaveCount(0);
+});
+
+test("search submits to /search?q=", async ({ page }) => {
+  await page.goto("/");
+
+  await page.getByRole("searchbox", { name: "Search playbooks" }).fill("internet bill");
+  // `exact` because the header's ⌘K trigger is also named "Search playbooks",
+  // and without it this resolves to two buttons and Playwright refuses to guess.
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+
+  await expect(page).toHaveURL(/\/search\?q=internet\+bill|\/search\?q=internet%20bill/);
+});
+
+test("⌘K opens the palette and navigates to a playbook", async ({ page }) => {
+  await page.goto("/");
+
+  // `ControlOrMeta` is Playwright's platform modifier — "MetaOrControl" is not a
+  // key it knows, and resolves to nothing.
+  await page.keyboard.press("ControlOrMeta+k");
+
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+
+  await dialog.getByRole("combobox").fill("internet");
+  await dialog.getByRole("option", { name: /Lower your internet bill/ }).click();
+
+  await expect(page).toHaveURL(/\/p\/lower-your-internet-bill/);
+});
+
+test("⌘K lists categories and quick actions at rest", async ({ page }) => {
+  await page.goto("/");
+  await page.keyboard.press("ControlOrMeta+k");
+
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByText("Personal finance")).toBeVisible();
+  await expect(dialog.getByText("Report a result")).toBeVisible();
+  await expect(dialog.getByText("Request a playbook")).toBeVisible();
+});
+
+test("the palette trigger in the header opens the palette", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: /Search playbooks/ }).first().click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+});

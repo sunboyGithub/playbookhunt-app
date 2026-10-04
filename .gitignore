@@ -19,6 +19,11 @@ next-env.d.ts
 .env.local
 .env.*.local
 
+# Claude Code local settings. settings.local.json held a live
+# ANTHROPIC_AUTH_TOKEN once, which is why it is ignored rather than merely
+# untracked — it must never reach a commit, and this repo is public.
+.claude/
+
 # Supabase — .temp/ holds local database secrets and a live socket
 supabase/.temp
 supabase/.branches

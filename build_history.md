@@ -502,3 +502,197 @@ does.
   Harmless: content is imported by the script, not by a SQL seed. Worth
   removing the reference or pointing it at the importer so the warning stops
   implying something is missing.
+
+---
+
+## P4 — Homepage v2 and PlaybookCard system
+
+**Status: complete and verified.**
+
+The checks below were all run to green. The first attempt at this milestone was
+written and reviewed by reading but never compiled, because the tool that
+executes commands became unavailable partway through; that draft is recorded
+under *Bugs found and fixed* below, because every one of those defects was real
+and only the checks found them.
+
+### What was written
+
+- **`src/lib/stats/format.ts`** — every outcome figure the UI renders, and the
+  thresholds that decide whether a figure may appear at all. Functions that can
+  show a percentage return a discriminated `{kind: "rate" | "early"}` rather
+  than a string, so no call site can format a rate without also deciding whether
+  one is allowed. `toOutcomeStats` merges a playbook with its stats row, because
+  `outcome_type` and `last_verified_at` live on one table and the counts on the
+  other, and a forgotten column would silently drop the median suffix.
+  **`format.test.ts` (38 tests) was written but has never been executed.**
+- **`src/components/playbook-card/`** — one card, three densities. All three
+  read evidence through the shared formatter, so a compact card cannot render a
+  percentage that a rich card would refuse.
+- **Homepage sections** in `src/components/home/` — hero with a rotating
+  placeholder, use-case carousel, proven row, top-this-week, trending switcher,
+  starter kits, category explorer, report CTA. Three are client components; the
+  rest are server components.
+- **`src/server/queries/home.ts`** — one function returning everything, so the
+  page has a single `await` and therefore no per-section skeletons, per the
+  prompt.
+- **⌘K palette** (`src/components/command-palette.tsx`) plus a new migration
+  adding `pg_trgm`, a GIN trigram index on `playbooks.title`, and a
+  `search_playbooks()` function restricted to published rows.
+- **`src/lib/site-config.ts`** — the Muse referral note. `termsUrl` is empty, so
+  `museReferralNote()` returns null and the note does not render. AGENTS.md
+  requires a link to Muse's official referral terms wherever a referral code
+  appears, and inventing that URL would put a fabricated citation in front of
+  every reader.
+- **e2e** — search submits to `/search?q=`, ⌘K opens and navigates, and a
+  navigation-regression spec that delays the destination document and asserts
+  the old page stays visible. `playwright.config.ts` gained an `E2E_TARGET=prod`
+  switch, because that spec is meaningless against the dev server.
+
+### Bugs found and fixed
+
+Ten defects, none of which a compiler or a reviewer would have found. Worth
+recording because they share a shape: each was a claim that read as true.
+
+**Statistics and labels**
+
+1. **The hero counter reported a page size as a catalogue size.** It derived
+   `totals.playbooks` from `playbooks.length`, but that list is `listPlaybooks`'
+   default page of 24. On a catalogue of ~48 the hero read "24 playbooks". Now
+   counted separately with a `head: true` count.
+2. **"Proven to work" checked half of its own bar.** `listProvenPlaybooks`
+   filtered on evidence count alone and never checked report count. Three
+   screenshots on one report are three evidence rows and one report, so a
+   five-report playbook would have sat under a heading promising proof. Now
+   requires `report_count >= REPORT_THRESHOLD` as well.
+3. **That same function could silently drop a proven playbook.** It filtered a
+   24-row page, so a genuinely proven playbook ranked 25th by evidence would
+   never appear — in the one row whose whole purpose is surfacing them. Now
+   requests a full-catalogue page.
+4. **"Top playbooks this week" was sorted by all-time evidence.** `evidence_score`
+   has no time window; `trending_score` is the weekly notion and is empty until
+   P9. Renamed to "Most proven", named for what it orders.
+5. **The "Proven to work" fallback discarded real results.** It triggered at
+   fewer than three qualifying playbooks, so two genuine ones were thrown away in
+   favour of three that had not cleared the bar. Now falls back only at zero.
+
+**Broken rendering**
+
+6. **Every page on the site crashed.** `CommandDialog` never wrapped its children
+   in `<Command>`, so `CommandInput` read an undefined cmdk context and threw on
+   `subscribe`. Because the ⌘K palette lives in the root layout, this took down
+   all 19 routes, not only the ones that opened the palette.
+7. **An ambiguous embed 500'd every listing route.** `PLAYBOOK_SELECT` embedded
+   `primary_agent:agents` without naming the foreign key, and there are two paths
+   from playbooks to agents — the `primary_agent_id` column and the
+   `playbook_agents` join table. PostgREST raised rather than guessing, which was
+   correct: guessing the join table would have attached the wrong agent to every
+   card. Fixed with `!playbooks_primary_agent_id_fkey`.
+8. **A database error would have 500'd every route.** `listCategories()` throws,
+   and it was called from the root layout — so a DB hiccup took down sign-in and
+   404 alike. The same failure mode P1 already recorded once. Now caught and
+   degraded to an empty category list.
+9. **The header's "Report a result" pointed at `/search`.** The route is
+   `/report`; the link was dead in both desktop and mobile nav.
+10. **The ⌘K palette was mounted twice**, once per breakpoint. Each instance
+    registered its own global ⌘K listener and its own dialog, so two Radix
+    dialogs opened on one keypress and fought over the focus trap — which is why
+    the shortcut test passed on one project and failed on the other. Now one
+    instance with a responsive trigger.
+
+**Content pipeline — a bug that predates P4**
+
+11. **Use-case membership had never been linked, ever.** `importCatalogMeta`
+    linked use-case members in phase 1, before any playbook was imported, so
+    every slug was reported as missing and skipped; phase 2 re-linked *kits* but
+    never use cases. The import still reported success, because a skipped link
+    and a written one produce the same summary when nothing was written. Fixed by
+    moving use-case linking into a second phase, and `linkMembers` now throws
+    rather than warns — at phase 2 an unresolved slug is never a sequencing
+    artefact.
+
+**Two tests that could not have caught their bug**
+
+12. **The navigation regression delayed nothing.** It intercepted the *document*,
+    but a `<Link>` click in the App Router is a client-side navigation that never
+    requests a document. The delay never applied, so the spec passed against a
+    no-op. It now intercepts the RSC payload — which is what React actually
+    waits on before swapping trees, and therefore the window the test exists to
+    measure.
+13. **It also asserted a target it did not run against.** Its comment claimed a
+    production build while `pnpm test:e2e` serves from `next dev`. It now skips
+    unless `E2E_TARGET=prod`, rather than passing against the wrong target.
+
+**Found by reading, before any check ran**
+
+14. `ReportCta` synthesised a stats object with `amount_n: 100` to force a median
+    to render — a fabricated statistic in source. Replaced with
+    `describeOutcome`, which formats the amount actually filed.
+15. A dangling `aria-labelledby` pointing at heading ids that had been removed.
+
+### Checks and results
+
+All run after the fixes above. Every one is green.
+
+| Check | Result |
+|---|---|
+| `pnpm db:reset` | 3 migrations applied, including `20240101000002_search.sql` |
+| `pnpm content:import` | 12 changes on an empty database, then `0 change(s) written, 14 unchanged` on re-run |
+| `pnpm typecheck` | clean |
+| `pnpm lint` | clean |
+| `pnpm test` | **75 passed** (38 stats, 18 content schema, 12 playbooks, 7 env) |
+| `pnpm test:db` | **36 pgTAP passed**, 2 files |
+| `pnpm build` | 17 static pages, 19 routes |
+| `pnpm test:e2e:prod` | **24 passed** — 16 on dev, 8 navigation skipped by design |
+
+The use-case fix was confirmed against the database rather than inferred from the
+import's own summary:
+
+```
+       slug        | playbooks
+-------------------+-----------
+ cut-monthly-bills |         2
+ plan-a-trip       |         1
+```
+
+### Two things this milestone got wrong about itself
+
+**A prediction I made and that was false.** I said the pgTAP suite would likely
+fail, since it was written in P2 against a schema with four functions and now
+there are five plus a GIN index. All 36 passed unchanged — they assert on tables,
+RLS and permissions, not on the exact contents of the function set.
+
+**A green build meant much less than it appeared to.** `pnpm build` succeeded
+early, while the homepage was 500ing on every request. Every listing route is
+`ƒ (Dynamic)`, so a build prerenders their shells and runs none of their queries.
+The build was never going to catch defect 7; Playwright did, on its first real
+request. Three of the six checks were green before anything was known to work.
+
+### What to inspect in the browser
+
+1. **`/`** — hero, category chips, use-case carousel, proven row, most-proven
+   list, starter kits, report CTA. With three playbooks and no reports, the
+   counter must read "3 playbooks" and **must not** show a results figure. The
+   proven row should fall back to "Recently verified".
+2. **`/` evidence text** — every card must show `Early · N reports`, never a
+   percentage. This is the AGENTS.md threshold doing its job with real data.
+3. **⌘K** — press it, type `internet`, and confirm it reaches the playbook. This
+   is `search_playbooks()` and the trigram index, exercised end to end for the
+   first time. At rest it must list categories and the two actions.
+4. **390×844** — the single palette trigger collapses to an icon button, the
+   hamburger opens the sheet, and the carousel peeks a tile past the right edge.
+5. **`/playbooks`, `/c/[slug]`, `/p/[slug]`** — all three share `PLAYBOOK_SELECT`
+   and all three were 500ing; confirm each renders a card with the right agent.
+
+### Blocks and unverified criteria
+
+- **The `/try` flow does not exist.** The rich card's Try button points at
+  `/p/[slug]`. P7 builds it; a button that 404s would be worse.
+- **`search_playbooks` is exercised by one e2e path.** It returns results and
+  ranks them, but nothing tests the published-only restriction or a query that
+  should match nothing. Worth a pgTAP test before P9 depends on it.
+- **`/search?q=` is still a placeholder route.** The homepage form submits there
+  and the page does nothing useful with the query yet.
+- **`museReferralNote()` returns null** because `termsUrl` is empty, so the
+  referral note never renders. That is deliberate — AGENTS.md requires a link to
+  Muse's official terms wherever a referral code appears — but it means the note
+  is untested and unrendered code until that URL is supplied.

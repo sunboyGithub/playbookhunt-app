@@ -1,59 +1,80 @@
-import Link from "next/link";
+import { CategoryExplorer } from "@/components/home/category-explorer";
+import {
+  CategoryChips,
+  HeroCounter,
+  ProvenRow,
+  QuickLinks,
+  ReportCta,
+  StarterKits,
+  TopPlaybooks,
+} from "@/components/home/sections";
+import { SearchField } from "@/components/home/search-field";
+import { TrendingByCategory } from "@/components/home/trending-by-category";
+import { UseCaseCarousel } from "@/components/home/use-case-carousel";
+import { getHomepageData } from "@/server/queries/home";
 
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+/**
+ * The homepage.
+ *
+ * One `await` for the whole page. The prompt is explicit that sections sharing
+ * a data request must appear together and must not each carry their own
+ * skeleton, because a page that assembles itself in pieces flashes empty
+ * containers at the reader. So there is no `loading.tsx` here and no per-section
+ * fallback — either the data arrives and the page renders whole, or the request
+ * fails and the route errors, which is visible and fixable rather than a silent
+ * half-empty page.
+ *
+ * `now` comes from the query rather than `Date.now()` here: reading the clock
+ * during render is an impure read the React Compiler rejects, and resolving one
+ * instant server-side keeps every relative date on the page consistent.
+ */
+export default async function HomePage() {
+  const data = await getHomepageData();
+  const now = data.now;
 
-export default function HomePage() {
   return (
     <main className="flex-1">
-      {/* Hero — the real headline, search and rotating placeholders arrive in P4. */}
-      <section className="mx-auto w-full max-w-6xl px-4 py-20">
-        <h1 className="max-w-3xl text-4xl font-semibold tracking-tight sm:text-5xl">
-          What do you want{" "}
-          <span className="text-muse">Muse</span> to do?
-        </h1>
-        <p className="mt-4 text-lg text-muted-foreground">Proven playbooks with real results.</p>
+      <div className="space-y-16 pb-20">
+        <section className="mx-auto w-full max-w-6xl px-4 pt-12 text-center">
+          <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">
+            What do you want <span className="text-muse">Muse</span> to do?
+          </h1>
+          <p className="mt-3 text-lg text-muted-foreground">Proven playbooks with real results</p>
 
-        <form action="/search" className="mt-8 flex max-w-xl gap-2">
-          <input
-            type="search"
-            name="q"
-            aria-label="Search playbooks"
-            placeholder="Save $100 on internet bill"
-            className="h-12 flex-1 rounded-lg border border-input bg-card px-4 text-base outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
-          />
-          <Button type="submit" size="lg" className="h-12">
-            Search
-          </Button>
-        </form>
+          <SearchField className="mx-auto mt-8 max-w-2xl" />
 
-        <p className="mt-4 text-sm text-muted-foreground">
-          Popular use cases, categories and starter kits arrive in P4.
-        </p>
-      </section>
+          <div className="mt-6 flex flex-col items-center gap-3">
+            <HeroCounter playbooks={data.totals.playbooks} reports={data.totals.reports} />
+            <QuickLinks />
+          </div>
+        </section>
 
-      <section className="mx-auto w-full max-w-6xl px-4 pb-20">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {[
-            { href: "/playbooks", title: "All playbooks", body: "Every published playbook, sorted by best evidence." },
-            { href: "/kits", title: "Starter kits", body: "Curated bundles for a goal, ordered for you." },
-            { href: "/categories", title: "Categories", body: "Eight categories, from personal finance to creativity." },
-          ].map((item) => (
-            <Card key={item.href} className="transition-colors hover:bg-accent/40">
-              <CardContent>
-                <Link href={item.href} className="block">
-                  <h2 className="font-medium">{item.title}</h2>
-                  <p className="mt-1 text-sm text-muted-foreground">{item.body}</p>
-                </Link>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        <CategoryChips categories={data.categories} />
 
-        <p className="mt-10 inline-flex rounded-lg border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground">
-          Placeholder — homepage built in P4.
-        </p>
-      </section>
+        <UseCaseCarousel useCases={data.useCases} />
+
+        <ProvenRow
+          playbooks={data.proven}
+          isFallback={data.provenIsFallback}
+          agentCounts={data.agentCounts}
+          now={now}
+        />
+
+        <TopPlaybooks playbooks={data.topThisWeek} now={now} />
+
+        <TrendingByCategory
+          playbooks={data.playbooks}
+          categories={data.categories}
+          agentCounts={data.agentCounts}
+          now={now}
+        />
+
+        <StarterKits kits={data.kits} />
+
+        <CategoryExplorer playbooks={data.playbooks} categories={data.categories} />
+
+        <ReportCta outcomes={data.recentOutcomes} />
+      </div>
     </main>
   );
 }

@@ -3,6 +3,7 @@ import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import {
   AMOUNT_THRESHOLD,
+  PROVEN_MIN_EVIDENCE_APPROVED,
   REPORT_THRESHOLD,
   type ListPlaybooksFilters,
   type PlaybookWithRelations,
@@ -12,6 +13,16 @@ import {
 /**
  * Columns every playbook row needs. Kept in one place so a card, a detail page
  * and a search result all describe a playbook identically.
+ *
+ * The agents embed names its foreign key explicitly. There are two paths from
+ * playbooks to agents — the `primary_agent_id` column and the `playbook_agents`
+ * join table — and with both present PostgREST cannot infer which one an
+ * unqualified `agents` embed means. It raises rather than guessing, which is the
+ * right behaviour: the alternative is guessing the join table and silently
+ * attaching the wrong agent to every card.
+ *
+ * Nothing resembling a SQL comment may appear inside this string; a `--` in a
+ * PostgREST select is a parse error.
  */
 const PLAYBOOK_SELECT = `
   id, slug, title, promise, category_id, status, who_for, who_not_for,
@@ -19,7 +30,7 @@ const PLAYBOOK_SELECT = `
   report_fields, followup_days, preview_image_url, primary_agent_id,
   author_id, current_version_id, last_verified_at, tags, created_at, updated_at,
   category:categories ( id, slug, name, emoji, description, sort ),
-  primary_agent:agents ( id, slug, display_name, vendor, home_url, capabilities, status ),
+  primary_agent:agents!playbooks_primary_agent_id_fkey ( id, slug, display_name, vendor, home_url, capabilities, status ),
   stats:playbook_stats (
     tried_count, report_count, worked, partly, didnt, success_rate_raw,
     wilson_lb, median_amount, p25, p75, amount_n, last30_success,
@@ -342,6 +353,13 @@ async function resolveMembershipIds(filters: ListPlaybooksFilters): Promise<stri
 }
 
 /**
+ * Page size used where a query must see every published row rather than one
+ * page of them. The catalogue is ~48 rows in v1, so this is generous rather
+ * than exact, and it is a floor for correctness, not a display limit.
+ */
+const CATALOGUE_PAGE = 500;
+
+/**
  * Playbooks eligible for the homepage's "Proven to work" row.
  *
  * AGENTS.md's bar is at least 20 reports *and* at least 3 evidence-approved
@@ -373,16 +391,33 @@ export async function listProvenPlaybooks(limit = 3): Promise<PlaybookWithRelati
     );
   }
 
-  const eligible = [...evidenceCount.entries()]
-    .filter(([, count]) => count >= 3)
+  const evidenceQualified = [...evidenceCount.entries()]
+    .filter(([, count]) => count >= PROVEN_MIN_EVIDENCE_APPROVED)
     .map(([playbookId]) => playbookId);
 
-  if (eligible.length === 0) {
+  if (evidenceQualified.length === 0) {
     return [];
   }
 
-  const rows = await listPlaybooks({}, "best_evidence");
-  return rows.filter((row) => eligible.includes(row.id)).slice(0, limit);
+  // The eligible set is small but its members are not necessarily the
+  // highest-ranked ones, so this asks for a page large enough to hold the whole
+  // catalogue. Filtering a default page instead would quietly drop any proven
+  // playbook that happens to rank below the cut — the exact case this row exists
+  // to surface.
+  const rows = await listPlaybooks({ limit: CATALOGUE_PAGE }, "best_evidence");
+
+  // Both halves of the bar, checked here rather than assumed. AGENTS.md requires
+  // at least 20 reports *and* at least 3 evidence-approved reports, and evidence
+  // count alone does not imply report count — three screenshots on one report is
+  // three evidence rows and one report. Filtering on evidence alone would put a
+  // five-report playbook under a heading that promises proven.
+  return rows
+    .filter(
+      (row) =>
+        evidenceQualified.includes(row.id) &&
+        (row.stats?.report_count ?? 0) >= REPORT_THRESHOLD,
+    )
+    .slice(0, limit);
 }
 
 /**

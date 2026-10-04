@@ -1,9 +1,10 @@
 "use client";
 
-import { Menu, Plus, Search, SquarePen, X } from "lucide-react";
+import { Menu, Plus, SquarePen, X } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
+import { CommandPalette } from "@/components/command-palette";
 import { Logo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
@@ -14,7 +15,18 @@ const NAV_LINKS = [
   { href: "/categories", label: "Categories" },
 ] as const;
 
-export function SiteHeader() {
+export type SiteHeaderProps = {
+  /**
+   * Categories, passed in from the server layout.
+   *
+   * The palette's rest state lists them, so they have to come from the database
+   * rather than a constant in the component — otherwise the list would drift
+   * from the taxonomy every time a category was renamed or added.
+   */
+  categories: { slug: string; name: string; emoji: string }[];
+};
+
+export function SiteHeader({ categories }: SiteHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
@@ -39,17 +51,16 @@ export function SiteHeader() {
 
         <div className="flex-1" />
 
-        {/* Search trigger — the ⌘K palette is wired up in P4. */}
-        <button
-          type="button"
-          className="hidden h-9 w-56 items-center gap-2 rounded-full border border-border bg-card px-3.5 text-sm text-muted-foreground transition-colors hover:bg-accent lg:flex"
-        >
-          <Search className="size-4" aria-hidden />
-          <span>Search playbooks</span>
-          <kbd className="ml-auto rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[11px]">
-            ⌘K
-          </kbd>
-        </button>
+        {/* One palette, not one per breakpoint. Each instance registers its own
+            global ⌘K listener and its own dialog, so rendering two meant two
+            dialogs competing for the focus trap on every shortcut press. The
+            trigger is responsive instead: a square icon button that becomes the
+            labelled pill at lg, with the label and shortcut badge collapsing
+            below that inside CommandPalette. */}
+        <CommandPalette
+          categories={categories}
+          className="size-9 justify-center rounded-full border-transparent px-0 lg:h-9 lg:w-56 lg:justify-start lg:border-border lg:px-3.5"
+        />
 
         <Button variant="outline" size="sm" className="hidden rounded-full md:inline-flex" asChild>
           <Link href="/create">
@@ -59,7 +70,7 @@ export function SiteHeader() {
         </Button>
 
         <Button variant="outline" size="sm" className="hidden rounded-full md:inline-flex" asChild>
-          <Link href="/search">
+          <Link href="/report">
             <SquarePen className="size-4" aria-hidden />
             Report a result
           </Link>
@@ -75,14 +86,6 @@ export function SiteHeader() {
         </Button>
 
         {/* Mobile controls */}
-        <button
-          type="button"
-          aria-label="Search"
-          className="inline-flex size-10 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-accent lg:hidden"
-        >
-          <Search className="size-5" aria-hidden />
-        </button>
-
         <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
           <SheetTrigger asChild>
             <button
@@ -133,7 +136,7 @@ export function SiteHeader() {
               <MobileLink href="/create" onNavigate={() => setMenuOpen(false)}>
                 + Create a playbook
               </MobileLink>
-              <MobileLink href="/search" onNavigate={() => setMenuOpen(false)}>
+              <MobileLink href="/report" onNavigate={() => setMenuOpen(false)}>
                 Report a result
               </MobileLink>
             </nav>

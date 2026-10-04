@@ -12,6 +12,7 @@
     "test:watch": "vitest",
     "test:db": "supabase test db",
     "test:e2e": "playwright test",
+    "test:e2e:prod": "E2E_TARGET=prod playwright test",
     "test:all": "pnpm test && pnpm test:db && pnpm test:e2e",
     "db:reset": "supabase db reset",
     "db:types": "supabase gen types typescript --local > src/lib/database.types.ts",

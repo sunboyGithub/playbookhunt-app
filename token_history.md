@@ -157,6 +157,64 @@ Two things are worth carrying forward as method:
   discarded, so a hard failure presented as a clean success. Adding a `throw`
   costs one line and closes the whole class.
 
+### P4 — Homepage v2 and PlaybookCard system
+
+**Tokens:** unavailable. No measurement source; see the note at the top.
+
+This milestone cost far more sessions in verification than in writing, and the
+ratio is the point worth recording.
+
+It began as the earlier entry did: the safety classifier that gates command
+execution went down partway through, so the homepage was written and reviewed by
+reading while nothing could be executed. Work stopped there and the state was
+written down as a draft, because shipping eight further uncompiled milestones
+would produce a large body of unvalidated code in a project whose premise is
+refusing to state anything unverified.
+
+The classifier came back intermittently — read-only commands passed while writes
+were refused — which turned out to be worse than a clean outage in one respect:
+it made progress feel possible while producing an unbounded number of very small
+fixes, none of which could be checked. The most useful thing available during
+that stretch was reading the code for defects, which found two real ones — a
+fabricated `amount_n: 100` and a dangling `aria-labelledby` — both invisible to
+the compiler.
+
+Once execution returned, the checks found **fifteen more defects** that reading
+had missed, including three that had shipped into earlier milestones:
+
+- a hero counter reporting a 24-row page size as the size of a ~48 catalogue;
+- a "Proven to work" row checking only half of the bar AGENTS.md defines, which
+  would have shown a five-report playbook as proven;
+- a command dialog that crashed every page on the site, because the ⌘K palette
+  lives in the root layout;
+- an ambiguous database embed that 500'd every listing route;
+- use-case membership that had **never once been linked**, because it was
+  attempted before the playbooks it referenced existed and never retried — the
+  import reported success throughout.
+
+The last is the one that generalises. It is the same failure P3 found in the
+version-diff, where a discarded `error` made a hard failure present as a clean
+success. Here the symptom was a warning nobody read, in an import whose summary
+line said "12 changes written" either way. Nothing about that bug was visible
+from the code; only running it, against a database, showed the memberships were
+empty.
+
+Two further lessons, both about checks rather than code:
+
+- **A green build meant almost nothing here.** `pnpm build` passed while the
+  homepage was 500ing on every request, because every listing route is dynamic
+  and a build prerenders their shells without running a query. Three of the six
+  checks were green before anything was known to work.
+- **One test was passing for the wrong reason twice over.** The navigation
+  regression spec delayed the HTML document, but an App Router `<Link>` click is
+  a client-side navigation that never requests a document — so the delay never
+  applied. It also asserted in its own comment that it ran against a production
+  build while the default target was the dev server.
+
+I predicted the 36 pgTAP tests would break on the added function and index. They
+passed unchanged; the prediction was wrong, and is recorded in
+`build_history.md` rather than quietly dropped.
+
 ---
 
 ## Maintaining this file

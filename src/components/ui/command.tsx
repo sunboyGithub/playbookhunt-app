@@ -59,7 +59,13 @@ function CommandDialog({
         )}
         showCloseButton={showCloseButton}
       >
-        {children}
+        {/* The children are cmdk parts — CommandInput, CommandList, CommandItem —
+            and each reads a Command context on render. Without this wrapper that
+            context is undefined, and CommandInput throws while reading
+            `subscribe` from it rather than failing quietly. This is also where
+            the popover surface styling belongs, which is why the wrapper is
+            unconditional rather than left to each caller. */}
+        <Command>{children}</Command>
       </DialogContent>
     </Dialog>
   )

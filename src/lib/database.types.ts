@@ -550,6 +550,11 @@ isOneToOne: false
 "owns_report":
 { Args: { "p_report_id": string }; Returns: boolean
                            },
+"search_playbooks":
+{ Args: { "q": string }; Returns: {
+              "category_name": string,"category_slug": string,"rank": number,"slug": string,"title": string
+            }[]
+                           },
 "show_limit":
 { Args: Record<PropertyKey, never>; Returns: number
                            },

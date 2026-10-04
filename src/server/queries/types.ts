@@ -56,11 +56,28 @@ export type PlaybookWithRelations = Playbook & {
 /** Filters accepted by `listPlaybooks`. All optional; omitted means "no filter". */
 export type ListPlaybooksFilters = {
   categorySlug?: string;
+  /**
+   * Several categories at once. Used by the Plan / Research / Create outcome
+   * pills, which are derived from category because `outcome_type` does not
+   * distinguish planning from researching from creating in v1.
+   *
+   * Ignored when `categorySlug` is set — that filter is the more specific of the
+   * two, and a reader who picked a category in the sidebar meant it.
+   */
+  categorySlugs?: string[];
   agentSlug?: string;
   /** `money_*` / `time_hours` / `binary`, per the P5 filter groups. */
   outcomeGroup?: "save_money" | "save_time" | "other";
   verifiedWithinDays?: number;
   minReports?: number;
+  /**
+   * Time-to-complete band, applied to `time_min`.
+   *
+   * On `time_min` rather than `time_max`: the band answers "how quick is the
+   * quick case", and a playbook whose floor is 70 minutes belongs in the 60+
+   * band whatever its ceiling is.
+   */
+  minTimeMinutes?: number;
   /** Inclusive upper bound on `time_min`, in minutes. */
   maxTimeMinutes?: number;
   collectionSlug?: string;
@@ -68,6 +85,10 @@ export type ListPlaybooksFilters = {
   limit?: number;
   offset?: number;
 };
+
+/** The outcome pills, in the order the brief lists them. */
+export const OUTCOME_GROUPS = ["save_money", "save_time", "other"] as const;
+export type OutcomeGroup = (typeof OUTCOME_GROUPS)[number];
 
 /** Every sort option the results page offers, in the order AGENTS.md lists them. */
 export const SORT_OPTIONS = [

@@ -53,7 +53,14 @@ export function CategoryExplorer({
                       : "border-transparent text-foreground hover:bg-muted/50"
                   }`}
                 >
-                  {category.name}
+                  {/* Emoji is `aria-hidden` because the name follows it
+                      immediately — announcing "money bag" before "Personal
+                      finance" would be noise. Same treatment as the category
+                      tiles in the empty state. */}
+                  <span className="flex items-center gap-2">
+                    <span aria-hidden>{category.emoji}</span>
+                    {category.name}
+                  </span>
                   <span className="text-xs text-muted-foreground">{category.playbook_count}</span>
                 </button>
               </li>

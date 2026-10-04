@@ -555,6 +555,11 @@ isOneToOne: false
               "category_name": string,"category_slug": string,"rank": number,"slug": string,"title": string
             }[]
                            },
+"search_playbooks_ranked":
+{ Args: { "match_limit"?: number,"q": string,"similarity_threshold"?: number,"syn"?: string }; Returns: {
+              "id": string,"rank": number
+            }[]
+                           },
 "show_limit":
 { Args: Record<PropertyKey, never>; Returns: number
                            },

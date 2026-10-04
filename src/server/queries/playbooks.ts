@@ -212,12 +212,30 @@ export async function listPlaybooks(
 
   let query = supabase.from("playbooks").select(PLAYBOOK_SELECT).eq("status", "published");
 
-  if (filters.categorySlug) {
-    query = query.eq("category.slug", filters.categorySlug);
+  // Category and agent are filtered on their *id* columns, not on the embedded
+  // resource's column. `eq("category.slug", …)` is not applied reliably by
+  // PostgREST here and returned the whole catalogue instead of the filtered
+  // subset — a filter that looks present in the URL and silently does nothing.
+  // Both columns are plain foreign keys on playbooks, so filtering on them
+  // directly cannot be misread, and it costs one extra lookup.
+  if (filters.categorySlug || (filters.categorySlugs && filters.categorySlugs.length > 0)) {
+    const slugs = filters.categorySlug ? [filters.categorySlug] : filters.categorySlugs!;
+    const ids = await resolveCategoryIds(slugs);
+    // A slug that matches no category means no playbooks, not every playbook.
+    // Treating it as "no filter" is how a hand-edited URL ends up showing the
+    // entire catalogue under a filter the reader believes is applied.
+    if (ids.length === 0) {
+      return [];
+    }
+    query = query.in("category_id", ids);
   }
 
   if (filters.agentSlug) {
-    query = query.eq("primary_agent.slug", filters.agentSlug);
+    const ids = await resolveAgentIds([filters.agentSlug]);
+    if (ids.length === 0) {
+      return [];
+    }
+    query = query.in("primary_agent_id", ids);
   }
 
   if (filters.outcomeGroup === "save_money") {
@@ -231,6 +249,10 @@ export async function listPlaybooks(
   if (filters.verifiedWithinDays !== undefined) {
     const since = new Date(Date.now() - filters.verifiedWithinDays * 86_400_000).toISOString();
     query = query.gte("last_verified_at", since);
+  }
+
+  if (filters.minTimeMinutes !== undefined) {
+    query = query.gte("time_min", filters.minTimeMinutes);
   }
 
   if (filters.maxTimeMinutes !== undefined) {
@@ -328,6 +350,34 @@ function compare(a: number | string | null | undefined, b: number | string | nul
     return String(right).localeCompare(String(left));
   }
   return right - left;
+}
+
+/**
+ * Category slugs to their ids.
+ *
+ * One extra round trip per filtered request, in exchange for filtering on a
+ * foreign key rather than on an embedded column. Returns an empty array for a
+ * slug that does not exist, which callers treat as "matches nothing".
+ */
+async function resolveCategoryIds(slugs: readonly string[]): Promise<string[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("categories").select("id").in("slug", [...slugs]);
+
+  if (error) {
+    throw new Error(`resolveCategoryIds: ${error.message}`);
+  }
+  return (data ?? []).map((row) => row.id as string);
+}
+
+/** Agent slugs to their ids. Same reasoning as `resolveCategoryIds`. */
+async function resolveAgentIds(slugs: readonly string[]): Promise<string[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("agents").select("id").in("slug", [...slugs]);
+
+  if (error) {
+    throw new Error(`resolveAgentIds: ${error.message}`);
+  }
+  return (data ?? []).map((row) => row.id as string);
 }
 
 async function resolveMembershipIds(filters: ListPlaybooksFilters): Promise<string[]> {
@@ -437,4 +487,43 @@ export async function listRecentlyVerifiedPlaybooks(limit = 3): Promise<Playbook
  */
 export function canShowSuccessRate(reportCount: number | null | undefined): boolean {
   return (reportCount ?? 0) >= REPORT_THRESHOLD;
+}
+
+/**
+ * Playbooks to show at the foot of a detail page: same category first, then
+ * anything else, never the playbook itself.
+ *
+ * Ordered by evidence within each group rather than by one score across both. A
+ * well-proven playbook in another category should not outrank a marginally less
+ * proven one the reader is obviously in the market for — the point of the row is
+ * "more like this", and category is the strongest signal of that.
+ *
+ * The category is not taken from the route: it is the *playbook's* category, so
+ * a hand-edited URL cannot make the page recommend a different set.
+ */
+export async function listRelatedPlaybooks(
+  playbook: Pick<PlaybookWithRelations, "id" | "category_id">,
+  limit = 3,
+): Promise<PlaybookWithRelations[]> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("playbooks")
+    .select(PLAYBOOK_SELECT)
+    .eq("status", "published")
+    .neq("id", playbook.id);
+
+  if (error) {
+    throw new Error(`listRelatedPlaybooks: ${error.message}`);
+  }
+
+  const rows = (data ?? []) as unknown as PlaybookWithRelations[];
+
+  const sameCategory = rows.filter((row) => row.category_id === playbook.category_id);
+  const others = rows.filter((row) => row.category_id !== playbook.category_id);
+
+  const byEvidence = (a: PlaybookWithRelations, b: PlaybookWithRelations) =>
+    (b.stats?.evidence_score ?? 0) - (a.stats?.evidence_score ?? 0);
+
+  return [...sameCategory.sort(byEvidence), ...others.sort(byEvidence)].slice(0, limit);
 }

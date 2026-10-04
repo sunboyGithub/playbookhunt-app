@@ -14,6 +14,7 @@ import {
   CommandSeparator,
 } from "@/components/ui/command";
 import { searchPlaybooks, type PlaybookSearchHit } from "@/app/actions/search-playbooks";
+import { cn } from "@/lib/utils";
 import type { CategoryWithCount } from "@/server/queries/taxonomy";
 
 /**
@@ -98,7 +99,17 @@ export function CommandPalette({
         type="button"
         onClick={() => setOpen(true)}
         aria-label="Search playbooks"
-        className={className ?? "inline-flex h-9 items-center gap-2 rounded-full border border-border bg-card px-3.5 text-sm text-muted-foreground transition-colors hover:bg-accent"}
+        // The layout classes are merged, not replaced. The header passes a
+        // className to resize the trigger at each breakpoint, and `??` used to
+        // throw this whole string away whenever it did — taking `inline-flex`,
+        // `items-center` and `gap-2` with it, which left the icon, the label and
+        // the shortcut badge on an inline text baseline instead of centred in
+        // the pill. `ml-auto` on the badge is a flex-only trick, so it went
+        // inert at the same time.
+        className={cn(
+          "inline-flex h-9 items-center gap-2 rounded-full border border-border bg-card px-3.5 text-sm text-muted-foreground transition-colors hover:bg-accent",
+          className,
+        )}
       >
         <Search className="size-4" aria-hidden />
         {/* The mobile trigger is a square icon button, so the label and the

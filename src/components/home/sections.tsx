@@ -162,8 +162,13 @@ export function CategoryChips({ categories }: { categories: CategoryWithCount[] 
         <Link
           key={category.id}
           href={`/c/${category.slug}`}
-          className="rounded-full border border-border bg-card px-4 py-2 text-sm transition-colors hover:bg-muted"
+          className="flex items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-sm transition-colors hover:bg-muted"
         >
+          {/* Same emoji the category cards and filter facets use, so the chip
+              and the page it links to are recognisably the same category.
+              `aria-hidden` because the name follows it directly — announcing
+              "money bag" before "Personal finance" is noise. */}
+          <span aria-hidden>{category.emoji}</span>
           {category.name}
         </Link>
       ))}

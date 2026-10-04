@@ -1,0 +1,54 @@
+slug: cheaper-car-insurance
+title: Find cheaper car insurance
+promise: Compare like-for-like car insurance options before deciding whether to switch.
+category: personal-finance
+use_cases: [cut-monthly-bills]
+tags: [car, insurance, quotes, premiums]
+status: published
+who_for: US drivers with an existing auto policy approaching renewal.
+who_not_for: People seeking a binding quote without providing details to an insurer.
+time: { min: 20, max: 45 }
+outcome: { type: money_yearly, unit: "$/yr" }
+required_capability: info
+followup_days: 7
+primary_agent: muse
+agents:
+  - {
+      slug: muse,
+      tested: false,
+      notes: "Authored example; outcome not yet tested.",
+    }
+preview_image: ""
+inputs:
+  - key: policy
+    label: Current coverage and renewal price
+    help: Paste a summary with names, addresses, policy numbers, and payment details removed.
+    type: textarea
+    required: true
+  - key: region
+    label: State and ZIP code
+    type: text
+    required: true
+  - key: preferences
+    label: Coverage preferences
+    type: textarea
+    required: false
+    why_it_helps: keeps comparisons aligned with your needs
+prompt: |
+  Help me compare car insurance renewal options in {{region}}.
+  My redacted current coverage and price: {{policy}}
+  My preferences: {{preferences}}
+  Make a checklist for collecting comparable quotes with the same coverage,
+  deductibles, drivers, and payment schedule. Identify publicly advertised discounts
+  with source links and dates, and distinguish estimates from binding quotes.
+  Do not invent prices, reduce coverage, submit personal details, purchase a policy,
+  or cancel my current policy without my explicit approval.
+  Calculate annual savings only from quotes I actually provide, including fees.
+  Ask me to confirm that replacement coverage is active before any cancellation.
+steps:
+  - Paste your redacted renewal summary
+  - Review the comparison checklist
+  - Collect equivalent quotes and review the tradeoffs
+  - Log the result
+sources: []
+changelog: Initial authored example

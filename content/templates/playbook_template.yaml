@@ -1,0 +1,68 @@
+# Playbook Hunt playbook template. Copy to content/playbooks/<slug>.yaml and fill in.
+# Lines marked REQUIRED must be filled before publishing; everything else is optional.
+
+slug: ""                      # REQUIRED. lowercase-with-dashes, e.g. lower-your-internet-bill
+title: ""                     # REQUIRED. Outcome-first, 6 words max, e.g. "Lower your internet bill"
+promise: ""                   # REQUIRED. One sentence: what the user gets
+category: ""                  # REQUIRED. personal-finance | travel-booking | travel-planning | shopping | small-business | productivity | health | creativity
+use_cases: []                 # Popular Use Cases this appears in, e.g. [cut-monthly-bills]
+tags: []                      # Search keywords, e.g. [comcast, xfinity, isp, wifi]
+status: draft                 # draft | published | archived
+
+who_for: ""                   # REQUIRED. Who it works best for
+who_not_for: ""               # Who should skip it
+time:
+  min: 10                     # minutes
+  max: 20
+
+outcome:
+  type: money_monthly         # REQUIRED. money_monthly | money_yearly | money_once | time_hours | binary
+  unit: "$/mo"                # e.g. $/mo, $/yr, $, hrs
+
+required_capability: info     # info | web_actions | phone_calls (does the agent need to call someone?)
+followup_days: 7              # when to ask "did it work?"
+primary_agent: muse
+agents:
+  - slug: muse
+    tested: false
+    notes: "Not yet tested."
+
+preview_image: ""             # Redacted real result, e.g. previews/<slug>.png
+
+# Keep required inputs to 1-2. Types: text | textarea | number | money | zip | provider_picker | select | date
+inputs:
+  - key: ""
+    label: ""
+    type: text
+    required: true
+    why_it_helps: ""          # shown next to optional fields, e.g. "finds local offers"
+    options: []               # only for provider_picker / select
+
+# Filters shown in "What happened for others" and dropdowns in the report form
+report_fields:
+  provider_options: []
+
+# REQUIRED. Use {{key}} for every input above. Tell the agent the role, goal, constraints and output.
+prompt: |
+
+
+steps:                        # Curated YAML importer: 3-5 non-empty steps. Creator form has a separate 1-5 rule.
+  - "Enter your details, then copy the prompt into Muse."
+  - "Review the response and confirm details before taking action."
+  - "Log the result"
+
+sources: []                   # Add only real source links. Do not include empty URLs or invented credits.
+# Example source shape (replace with an actual source before adding):
+# - platform: x               # x | threads | reddit | rednote | other
+#   handle: ""
+#   url: "https://..."
+#   title: ""
+
+changelog: "Initial version"
+
+# Internal testing notes (not shown on the site)
+testing:
+  tested_by: ""
+  tested_on: ""               # YYYY-MM-DD
+  runs: 0
+  result_notes: ""

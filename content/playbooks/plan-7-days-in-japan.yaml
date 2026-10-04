@@ -1,0 +1,53 @@
+slug: plan-7-days-in-japan
+title: Plan seven days in Japan
+promise: Draft a practical seven-day itinerary matched to your budget and pace.
+category: travel-planning
+use_cases: [plan-a-trip]
+tags: [japan, itinerary, travel, tokyo, kyoto]
+status: published
+who_for: Travelers planning a first seven-day leisure trip to Japan.
+who_not_for: Travelers seeking confirmed reservations or immigration advice.
+time: { min: 15, max: 30 }
+outcome: { type: time_hours, unit: hrs }
+required_capability: info
+followup_days: 7
+primary_agent: muse
+agents:
+  - {
+      slug: muse,
+      tested: false,
+      notes: "Authored example; outcome not yet tested.",
+    }
+preview_image: ""
+inputs:
+  - key: dates
+    label: Dates and arrival city
+    type: text
+    required: true
+  - key: budget
+    label: Budget and party size
+    type: text
+    required: true
+  - key: interests
+    label: Interests, pace, and accessibility needs
+    type: textarea
+    required: false
+    why_it_helps: makes the itinerary fit your group
+prompt: |
+  Draft a seven-day Japan itinerary for {{dates}}.
+  Budget and party size: {{budget}}
+  Interests, preferred pace, and accessibility needs: {{interests}}
+  Group nearby activities, include realistic transit time and rest breaks, and
+  distinguish confirmed information from estimates. Link official sources for
+  opening hours, reservations, and transport; flag anything that needs checking
+  for my dates. Compare individual rail fares against any proposed pass using
+  current published prices rather than assuming a pass is cheaper.
+  Include a rainy-day alternative and a short booking checklist. Do not make
+  bookings or payments. Ask about missing preferences rather than inventing them.
+steps:
+  - Share your dates, budget, and interests
+  - Review the daily itinerary and transit estimates
+  - Check official opening hours and reservation requirements
+  - Log the result
+sources: []
+changelog: Initial authored example

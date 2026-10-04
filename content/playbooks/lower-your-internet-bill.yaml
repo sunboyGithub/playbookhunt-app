@@ -1,0 +1,107 @@
+# Filled example. Stats are never written here: they come only from real tries and reports.
+
+slug: lower-your-internet-bill
+title: Lower your internet bill
+promise: Negotiate a lower rate with your provider using Muse.
+category: personal-finance
+use_cases: [cut-monthly-bills]
+tags:
+  [
+    internet,
+    wifi,
+    isp,
+    comcast,
+    xfinity,
+    spectrum,
+    att,
+    verizon,
+    bill,
+    negotiate,
+    retention,
+  ]
+status: published
+
+who_for: US home internet customers paying over $60/month, 6+ months with the same provider.
+who_not_for: People still on promo pricing, or in areas with a single provider.
+time:
+  min: 10
+  max: 20
+
+outcome:
+  type: money_monthly
+  unit: "$/mo"
+
+required_capability: phone_calls
+followup_days: 7
+primary_agent: muse
+agents:
+  - slug: muse
+    tested: false
+    notes: Authored example; outcome not yet tested.
+
+preview_image: "" # No verified preview supplied.
+
+inputs:
+  - key: provider
+    label: Provider
+    type: provider_picker
+    required: true
+    options: [Xfinity, Spectrum, AT&T, Verizon, T-Mobile, Cox, Other]
+  - key: price
+    label: Monthly price
+    type: money
+    required: false
+    why_it_helps: better offers
+  - key: zip
+    label: ZIP code
+    type: zip
+    required: false
+    why_it_helps: finds local offers
+  - key: bill
+    label: Your latest bill
+    type: textarea
+    required: false
+    why_it_helps: makes the prompt most accurate
+
+  - key: plan
+    label: Plan name and speed
+    type: text
+    required: false
+    why_it_helps: compares equivalent plans
+  - key: tenure
+    label: Customer tenure
+    type: text
+    required: false
+    why_it_helps: identifies loyalty offers
+
+report_fields:
+  provider:
+    type: select
+    options: [Xfinity, Spectrum, AT&T, Verizon, T-Mobile, Cox, Other]
+
+prompt: |
+  You are helping me lower my home internet bill.
+  My provider is {{provider}}. I pay {{price}} per month in ZIP {{zip}}.
+  My latest bill (redacted): {{bill}}
+  Plan name and speed: {{plan}}. Time with this provider: {{tenure}}.
+  1. Find current public offers from {{provider}} and competitors available in my ZIP, with sources.
+  2. Contact {{provider}}'s retention/loyalty team (call or chat) and ask for a lower rate for the same or better speed.
+  3. Use competitor offers as leverage; if refused, ask for a promo credit, a cheaper equivalent plan, or a waived equipment fee.
+  4. Never agree to a longer contract or a slower plan without asking me first.
+  5. Summarize: old price, new price, what changed, and any end date.
+
+steps:
+  - Paste your redacted latest bill
+  - Review the offers Muse finds
+  - Approve the script, then call or chat with your provider
+  - Log the result
+
+sources: [] # Add only verified source URLs.
+
+changelog: Initial version
+
+testing:
+  tested_by: ""
+  tested_on: ""
+  runs: 0
+  result_notes: ""

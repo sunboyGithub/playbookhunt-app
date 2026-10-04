@@ -1,0 +1,64 @@
+# Starter catalog: references only the three supplied authored playbooks. No verified outcomes are claimed.
+use_cases:
+  - slug: cut-monthly-bills
+    title: Cut monthly bills
+    description: Explore authored playbooks for reviewing recurring bills.
+    gradient:
+      - "#2F4F46"
+      - "#5E7F73"
+    sort: 1
+    playbooks:
+      - lower-your-internet-bill
+      - cheaper-car-insurance
+  - slug: plan-a-trip
+    title: Plan a trip
+    description: Itineraries, checklists and packing lists tuned to you.
+    gradient:
+      - "#3E3F63"
+      - "#7E7FA6"
+    sort: 3
+    playbooks:
+      - plan-7-days-in-japan
+starter_kits:
+  - slug: cut-your-bills-kit
+    title: Cut your bills kit
+    blurb: A starter collection of authored playbooks. Outcomes have not yet been
+      verified.
+    illustration: ""
+    featured: true
+    playbooks:
+      - lower-your-internet-bill
+      - cheaper-car-insurance
+  - slug: japan-trip-kit
+    title: Japan trip kit
+    blurb: A starter collection of authored playbooks. Outcomes have not yet been
+      verified.
+    illustration: ""
+    featured: true
+    playbooks:
+      - plan-7-days-in-japan
+categories:
+  - slug: personal-finance
+    name: Personal finance
+    icon: $
+  - slug: travel-booking
+    name: Travel – booking
+    icon: ✈
+  - slug: travel-planning
+    name: Travel – planning
+    icon: map
+  - slug: shopping
+    name: Shopping
+    icon: bag
+  - slug: small-business
+    name: Small business
+    icon: store
+  - slug: productivity
+    name: Productivity
+    icon: bolt
+  - slug: health
+    name: Health
+    icon: heart
+  - slug: creativity
+    name: Creativity
+    icon: palette

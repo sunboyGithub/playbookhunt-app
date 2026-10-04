@@ -1,0 +1,1 @@
+ChatGPT (OpenAI mark), Grok, and Manus SVG marks sourced from https://github.com/lobehub/lobe-icons/tree/master/packages/static-svg/icons under the included MIT license. Fixed intrinsic size and dark fill for local image rendering. Brand marks remain owned by their respective companies.

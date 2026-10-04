@@ -1,0 +1,126 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+  Playbook Hunt design tokens.
+  Values come from AGENTS.md — do not change them without updating the brief.
+  Light theme only; there is deliberately no .dark block.
+*/
+
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-geist-sans);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* Brand accent (#FF5A1F) — primary CTA and the "Hunt" wordmark. */
+  --color-brand: var(--brand);
+
+  /* Outcome colours. Ranking and outcome copy must use these, never ad-hoc hues. */
+  --color-worked: var(--worked);
+  --color-partly: var(--partly);
+  --color-didnt: var(--didnt);
+
+  /* Muse blue, sampled from the Muse logo. Used for everything Muse. */
+  --color-muse: var(--muse);
+  --color-muse-soft: var(--muse-soft);
+  --color-muse-dark: var(--muse-dark);
+  --color-muse-line: var(--muse-line);
+  /* Meta-blue ring drawn around the Muse avatar (#0081FB). */
+  --color-muse-ring: var(--muse-ring);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.34);
+  --radius-2xl: calc(var(--radius) * 1.67);
+  --radius-3xl: calc(var(--radius) * 2);
+}
+
+:root {
+  /* Surfaces */
+  --background: #faf9f6;
+  --foreground: #1a1917;
+  --card: #ffffff;
+  --card-foreground: #1a1917;
+  --popover: #ffffff;
+  --popover-foreground: #1a1917;
+
+  /* Accent — primary CTA, "Hunt" wordmark */
+  --primary: #ff5a1f;
+  --primary-foreground: #ffffff;
+
+  --secondary: #f2f0ec;
+  --secondary-foreground: #1a1917;
+  --muted: #f2f0ec;
+  --muted-foreground: #6b675f;
+  --accent: #f2f0ec;
+  --accent-foreground: #1a1917;
+  --destructive: #dc2626;
+
+  --border: #e7e5e0;
+  --input: #e7e5e0;
+  --ring: #ff5a1f;
+
+  /* Brand */
+  --brand: #ff5a1f;
+
+  /* Outcomes */
+  --worked: #16a34a;
+  --partly: #f59e0b;
+  --didnt: #dc2626;
+
+  /* Muse blue */
+  --muse: #2a66de;
+  --muse-soft: #e8effc;
+  --muse-dark: #1d4fb8;
+  --muse-line: #c3d4f5;
+  --muse-ring: #0081fb;
+
+  /* Cards use 12–16px radii: --radius drives lg (12px) and xl (16px). */
+  --radius: 0.75rem;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    @apply font-sans;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  /* Interactive controls keep 44px touch targets (AGENTS.md, footer/mobile parity). */
+  button,
+  a[role="button"] {
+    touch-action: manipulation;
+  }
+}

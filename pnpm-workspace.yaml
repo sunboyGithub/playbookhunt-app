@@ -1,0 +1,5 @@
+allowBuilds:
+  # Required by Next.js image optimization (next/image) in production builds.
+  sharp: true
+  # Native resolver binary used by eslint-config-next.
+  unrs-resolver: true

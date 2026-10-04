@@ -1,5 +1,8 @@
 import { expect, test } from "@playwright/test";
 
+import { reportCountsBySlug } from "./support/db";
+import { REPORT_THRESHOLD } from "../src/server/queries/types";
+
 test("homepage loads and renders the shared shell", async ({ page }) => {
   await page.goto("/");
 
@@ -46,15 +49,38 @@ test("renders with no console errors or hydration warnings", async ({ page }) =>
   expect(problems).toEqual([]);
 });
 
-test("shows early evidence, not a percentage, with no reports", async ({ page }) => {
+test("shows a percentage only for a playbook with enough reports", async ({ page }) => {
   await page.goto("/");
 
-  // The seeded catalogue has three playbooks and no reports. AGENTS.md forbids a
-  // success percentage below 20 reports, so the page must be showing "Early"
-  // wording and no percentage at all — this fails loudly if a threshold is ever
-  // bypassed rather than quietly rendering "0% worked".
-  await expect(page.getByText(/Early · \d+ reports/).first()).toBeVisible();
-  await expect(page.getByText(/^\d+% worked$/).first()).toHaveCount(0);
+  // The rule is per-playbook, so the test is per-playbook. An earlier version
+  // asserted "no percentage anywhere on the homepage", which was true only
+  // while nothing had been seeded — and stopped being true, correctly, the moment
+  // `pnpm db:seed-stats` gave a playbook 40 reports. Asserting globally would
+  // have meant deleting the fixtures to keep a test green, which is the wrong
+  // trade: the state with reports is the state the product ships in.
+  //
+  // `lower-your-internet-bill` is the below-threshold case (7 reports with
+  // fixtures, 0 without), so it is below the line either way.
+  const belowThreshold = page
+    .getByTestId("playbook-card")
+    .filter({ hasText: "Lower your internet bill" })
+    .first();
+
+  await expect(belowThreshold).toBeVisible();
+  await expect(belowThreshold.getByText(/^\d+% worked$/)).toHaveCount(0);
+  await expect(belowThreshold.getByText(/Early · \d+ reports/)).toBeVisible();
+
+  // The converse, so the rule is not satisfied by never publishing anything.
+  // Only assertable when fixtures exist; skipped rather than faked otherwise.
+  const counts = await reportCountsBySlug(["cheaper-car-insurance"]);
+  if ((counts.get("cheaper-car-insurance") ?? 0) >= REPORT_THRESHOLD) {
+    const aboveThreshold = page
+      .getByTestId("playbook-card")
+      .filter({ hasText: "Cheaper car insurance" })
+      .first();
+
+    await expect(aboveThreshold.getByText(/^\d+% worked$/)).toBeVisible();
+  }
 });
 
 test("search submits to /search?q=", async ({ page }) => {
@@ -69,7 +95,13 @@ test("search submits to /search?q=", async ({ page }) => {
 });
 
 test("⌘K opens the palette and navigates to a playbook", async ({ page }) => {
-  await page.goto("/");
+  // `networkidle` rather than the default `load`. The shortcut is bound in a
+  // `useEffect`, so it does not exist until hydration, and `keyboard.press`
+  // has nothing to wait for — unlike a click, which Playwright holds until the
+  // element is actionable. On a plain `load` the keypress can land first and be
+  // dropped, which is a race in the test rather than a defect in the page: a
+  // person cannot press ⌘K sooner than the page finishes loading.
+  await page.goto("/", { waitUntil: "networkidle" });
 
   // `ControlOrMeta` is Playwright's platform modifier — "MetaOrControl" is not a
   // key it knows, and resolves to nothing.
@@ -85,7 +117,8 @@ test("⌘K opens the palette and navigates to a playbook", async ({ page }) => {
 });
 
 test("⌘K lists categories and quick actions at rest", async ({ page }) => {
-  await page.goto("/");
+  // Same hydration wait as the palette test above, for the same reason.
+  await page.goto("/", { waitUntil: "networkidle" });
   await page.keyboard.press("ControlOrMeta+k");
 
   const dialog = page.getByRole("dialog");

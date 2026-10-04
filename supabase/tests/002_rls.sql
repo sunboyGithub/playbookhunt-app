@@ -90,14 +90,27 @@ select throws_ok(
   'anon cannot read outcome_reports.user_id'
 );
 
+-- Scoped to this file's own playbook, like the assertion above. An unscoped
+-- count is a statement about the whole table, and the table is not this test's
+-- to assume: `pnpm db:seed-stats` writes reports here, and an unscoped count
+-- reported 72 against an expected 1 when it did. What the test means to say is
+-- that anon can read the view and that its rows are the fixture's own.
 select is(
-  (select count(*)::int from public.public_reports),
+  (
+    select count(*)::int
+    from public.public_reports
+    where playbook_id = (select id from public.playbooks where slug = 'test-playbook')
+  ),
   1,
   'anon can read the anonymised public_reports view'
 );
 
+-- Same scoping reason: `limit 1` over an unsorted view picks an arbitrary row,
+-- so seeded reports would decide which initial this asserts on.
 select is(
-  (select display_initial from public.public_reports limit 1),
+  (select display_initial
+     from public.public_reports
+    where playbook_id = (select id from public.playbooks where slug = 'test-playbook')),
   'A',
   'public_reports exposes an initial instead of an identity'
 );

@@ -57,6 +57,7 @@ used to derive per-milestone usage.
 | P3 | unavailable | unavailable | unavailable |
 | P4 | unavailable | unavailable | unavailable |
 | P5 | unavailable | unavailable | unavailable |
+| P6 | unavailable | unavailable | unavailable |
 
 ---
 
@@ -245,6 +246,51 @@ refused `Bash` and so made running the checks — the whole point of the milesto
 final verification themselves. Two consequences worth recording rather than
 glossing: work was committed only after their run confirmed green, and several
 iterations of edit-then-verify simply could not happen in the intended order.
+
+---
+
+### P6 — Playbook detail page
+
+**Tokens: unavailable. No measurement source.**
+
+No `/cost` command, no OpenRouter total, no session counter that survives a
+context compaction. The classifier outage in P5 that forced the user to run the
+verification commands did not recur, so every check in this milestone ran
+unattended — but that is a statement about who typed the commands, not about what
+they cost. The table stays `unavailable`.
+
+What this milestone actually cost is not knowable from inside it, and the
+interesting number would be the retry count rather than the total. Five e2e tests
+failed, and **in every one the test was wrong and the app was right**. Each was
+diagnosed by reading the actual failure rather than by pattern-matching the test
+name, which is the behaviour P5 was written down to force:
+
+- `grantPermissions(["clipboard-write"])` fails on WebKit by design.
+- `page.route()` on `/rest/v1/try_events` could never fire, because a server
+  action's Supabase call is made by the Node process and not by the browser.
+- `.or()` unions elements and then fails strict mode for having two.
+- "Exactly one visible try button" is true on desktop and false on mobile.
+- The ⌘K tests were racing hydration, and were passing before only by luck.
+
+The last one is the cost worth naming. It had been latent since P4, passing on
+timing rather than on correctness, and it only surfaced when seeding fixtures made
+the homepage slower to hydrate. A test that cannot fail is not free — it is a
+claim that has not been checked, and it stays that way until something perturbs it.
+
+Two more findings of the same kind came from work that was not a failing test at
+all. The `revalidate = 300` on the detail route was inert because the root layout
+reads `cookies()` via the header's category nav, and the comment above it claimed
+a five-minute staleness bound that did not exist — a false claim sitting in the
+source, written by me, that only surfaced because I checked the build output
+instead of trusting the constant. And the seed script's log line reported "rate
+shows" for a playbook with 7 reports, because it tested a fraction rather than
+the threshold the page actually uses.
+
+The pattern across all of these is the same: an assumption that was never
+exercised stayed written down until something exercised it. The cheapest available
+signal is still the same as in P5 — run the checks, read the actual error text
+rather than the summary line, and check the build output rather than the code's
+own comments.
 
 ---
 

@@ -838,3 +838,198 @@ while `/categories` already showed them. Both now render the same emoji.
   labelled for screen readers.** An accessible-name assertion was dropped when
   the locator moved to `data-facet` to escape Radix's `aria-hidden` handling.
   Nothing about the UI regressed, but that property is no longer asserted.
+
+## P6 — Playbook detail page
+
+### What was built
+
+**The page itself** — `src/app/p/[slug]/page.tsx`, replacing a placeholder stub.
+Breadcrumb, title, promise, category, primary agent and time range in the header;
+then stat tiles, the redacted outcome preview, who it is for / not for, inputs,
+the prompt, the steps, the worked/partly/didn't bar, the report list with its
+filters, and a report CTA. `generateMetadata` publishes the promise verbatim as
+the description, a canonical URL and OpenGraph tags. `HowToJsonLd` emits the steps
+and nothing else — deliberately no `aggregateRating`, because a success percentage
+is not a star rating, and emitting one would put in a search result a number this
+site never computed.
+
+**The statistic layer** — `src/lib/stats/detail.ts`, split out of `format.ts`
+because these return structured results rather than strings. A tile is a value
+plus the caption that explains what it counts, and whether that caption is a
+percentage or the word "Early" is a threshold decision the caller must not be able
+to make for itself. Returning a string would let a component print `68% worked` on
+four reports by calling `.toString()` on something it should have had to ask
+about. Thresholds are imported from `server/queries/types.ts` and never restated.
+
+**The bar, and why it carries two numbers per segment.** `percent` is
+`count / report_count`, the share of all reports, rounded for a label. `width` is
+`count / sum(counts)`, exact, because the bar has to fill its track. They differ
+whenever `worked + partly + didnt` is not exactly `report_count`, which happens
+whenever a report is rejected or flagged an outlier. Normalising widths by
+`report_count` would render a bar that stops two-thirds of the way across and
+looks like a rendering bug rather than like what it is. The three labels are left
+to round independently rather than forced to sum to 100, because forcing them
+would mean inventing percentages.
+
+**`last30Line` takes its denominator as a parameter.** `playbook_stats` stores
+`last30_success` without the count it was computed from, so a 30-day percentage
+cannot be threshold-checked at all — and an uncheckable percentage is exactly what
+AGENTS.md forbids. The caller counts recent reports itself and passes the number
+in. It reads `last30_success` and never `success_rate_raw`: the two are different
+measurements, and labelling the all-time rate as a 30-day figure produces a page
+whose halves each look right and whose labels disagree.
+
+**`src/lib/share.ts`** — pure URL builders, no DOM, in brief order. Instagram and
+TikTok get `href: null, nativeOnly: true`, because no web share URL exists for
+them; the menu falls back to copy-link on desktop rather than inventing a link.
+
+**Twelve detail components** in `src/components/playbook/detail/`: stat tiles,
+worked bar, prompt block, share menu, save button, works-with, sources list,
+sidebar, report list, report filters, inputs list, and the audience/steps/
+outcome-preview/report-CTA group.
+
+**A try page** at `/p/[slug]/try`, deliberately minimal and documented as
+incomplete until P7. It exists so the sidebar's try button is not a 404 — a button
+that does less is better than one that goes nowhere.
+
+**An opengraph image** at 1200×630, whose evidence line is rendered by the *same*
+`formatEvidenceHeadline`/`formatEvidenceSampleSize` the cards use. A share image
+is the easiest place in the product to leak a percentage the page was not allowed
+to show, so it does not get its own formatting path.
+
+**`outcome_reports.evidence_reviewed`** — a migration adding the column and
+re-declaring `public_reports` with it appended last, because `CREATE OR REPLACE
+VIEW` can only append columns. `report_evidence` has no public select policy, so
+the page otherwise cannot ask whether a report's evidence was approved. The leak is
+one boolean, never the file, path or uploader.
+
+**`log-try-event`** — a server action inserting into `try_events` with a
+first-party `ph_device` httpOnly cookie. It never throws: a failed analytics
+insert must not surface on an interaction that otherwise worked.
+
+**`scripts/seed-fixture-stats.ts`** and `pnpm db:seed-stats`, which writes
+synthetic reports so the bar, median, last-30 line and report list can be *seen*.
+Every report belongs to a profile named "Fixture reporter N", so a populated page
+is obviously populated with fixtures. It refuses any non-localhost URL, because a
+fixture that can reach production would be a way to publish 40 fake verified
+reports on a product whose entire claim is that its reports are real.
+
+### Checks and results
+
+| Check | Result |
+| --- | --- |
+| `pnpm lint` | clean, 0 errors 0 warnings |
+| `pnpm typecheck` | clean |
+| `pnpm test` | **181 passed**, 10 files (was 141) |
+| `pnpm test:db` | **48 pgTAP passed**, 3 files |
+| `pnpm build` | succeeded, 22 routes, all `ƒ (Dynamic)` |
+| `pnpm test:e2e` | **90 passed, 8 skipped, 0 failed** (was 80 passed, 10 skipped, 8 failed) |
+
+### Five test failures, and in every case the test was the thing that was wrong
+
+This is the P5 lesson held to, and it paid out: all five were fixed by correcting
+the test, none by changing the app.
+
+1. **`grantPermissions(["clipboard-write"])` is rejected outright by WebKit** —
+   "Unknown permission" — not ignored, but fatal to the whole call. The mobile
+   project is iPhone 13. Now granted per browser.
+2. **`page.route("**/rest/v1/try_events**")` could never have fired.**
+   `logTryEvent` is a server action: the browser POSTs to the Next route with a
+   `Next-Action` header and the Supabase insert happens *server-side*. `page.route`
+   only sees requests the browser makes. The test now reads the row back with the
+   service role, which is the stronger assertion anyway — it proves the action ran,
+   wrote the right value, and attached it to the right playbook.
+3. **`.or()` unions two elements, then fails strict mode for containing two.**
+   The try button exists twice by design. The assertion was wrong about the page.
+4. **Exactly one visible try button is true on desktop and false on mobile.** The
+   sidebar sits below the entire main column on a phone, so its CTA is a
+   deliberate second CTA rather than a replacement for the mobile bar's. The test
+   now asserts where they point, not how many there are.
+5. **The ⌘K tests were racing hydration.** The shortcut is bound in a `useEffect`,
+   so it does not exist until hydration, and `keyboard.press` has nothing to wait
+   for — unlike a click, which Playwright holds until actionable. This is why the
+   header-button test passed and the keyboard one failed. Seeding fixtures made the
+   homepage slower to hydrate and exposed a race that was already there. A real
+   person cannot press ⌘K before the page loads, so this is a test-timing fix, not
+   a product one.
+
+### Two tests that assumed an empty database
+
+Seeding fixtures broke three assertions written in earlier milestones. All three
+were **scoped rather than weakened**, because a suite that only ever sees an empty
+database is testing a state that stops existing on day one:
+
+- `002_rls.sql` asserted `count(*) = 1` over the whole `public_reports` view and
+  got 72. Its sibling assertion one block above already scoped by `test-playbook`;
+  these now match. The `display_initial` check also used `limit 1` over an unsorted
+  view, so seeded rows decided which initial it asserted on — now scoped too.
+- `home.spec.ts` asserted "no percentage anywhere on the homepage". The rule is
+  per-playbook, so the test is now per-card: `lower-your-internet-bill` shows
+  Early and no percentage, and the converse is asserted too so the rule is not
+  satisfied by never publishing anything.
+- The detail page's "empty stats" test now reads the report count from the database
+  and asserts the correct side of the threshold, whichever side that is.
+
+### The `revalidate = 300` on this route is currently inert
+
+The build reports `/p/[slug]` as `ƒ (Dynamic)`. So does `/privacy`, and `/terms`,
+and every other route — including ones with no data at all. The cause is the root
+layout: `src/app/layout.tsx` calls `listCategories()` for the header nav, that query
+uses the server Supabase client, and `lib/supabase/server.ts` reads `cookies()`. A
+`cookies()` read in the root layout opts the entire app into dynamic rendering.
+
+The constant is kept and now carries a comment saying so, because the previous
+comment claimed a five-minute staleness bound that does not exist. The fix is to
+give the layout's nav query a public client that does not touch the session; that
+is its own change and is not smuggled into this milestone.
+
+### What to inspect in the browser
+
+1. **`/p/cheaper-car-insurance`** — 40 fixture reports. All three tiles populated:
+   tried count, a rate *with its denominator attached* (`n = 40 reports`), and a
+   median with `n = 20 with amounts`. The bar renders three segments with counts
+   beside them, and a "Last 30 days" line underneath.
+2. **`/p/lower-your-internet-bill`** — 7 fixture reports, deliberately below the
+   threshold. The bar must be **absent**, not an empty track, and must say
+   `Not enough reports yet — 7 so far` rather than showing any percentage. This is
+   the withholding rule, and it is the single most important thing to check by eye.
+3. **`/p/plan-7-days-in-japan`** — `outcome_type` is `time_hours`, so the median
+   tile reads `4 hrs saved`, not `$4`. Confirm the unit follows the outcome type.
+4. **Copy the prompt** — the button collapses at `max-h-28` with a gradient fade,
+   expands, and the toast reads `Copied! Paste it into Muse.` with a link to the
+   try page. Paste it somewhere and confirm whitespace survived.
+5. **Share menu** — Instagram and TikTok must show as copy-link fallbacks, not as
+   dead web links.
+6. **Report filters** — choose an agent, a provider and a result; all three go to
+   the URL and a pasted URL reproduces the same list.
+7. **390×844** — the try button appears under the header *and* again in the sidebar
+   far below. Both are intentional; the sources and "Good to know" blocks appear
+   once only.
+8. **Save button while signed out** — opens a dialog titled exactly
+   "Sign in to save this playbook". It must not fake a saved state.
+
+### Blocks and unverified criteria
+
+- **`/api/revalidate` is unauthenticated.** `POST {slug}` revalidates a path with
+  no secret. It cannot corrupt anything, but anyone can use it as a cache-buster.
+  The shared-secret check is deferred to P9, and the route says so in-file.
+- **The Save button is deliberately half-built.** Signed out it opens the sign-in
+  dialog; it never shows a saved state, because faking one would be a lie in a
+  product built on real evidence. `SaveToggle` is the P8 seam.
+- **The agent marks are placeholder glyphs**, deliberately not vendor trademarks —
+  inline SVG per slug with a generic fallback. Swapping in real assets is a change
+  to one file, `src/components/agents/agent-mark.tsx`.
+- **`pnpm test:e2e:prod` has still not been run.** The 8 navigation tests only
+  execute under `E2E_TARGET=prod` and are untested against every change in this
+  milestone, including all twelve new components.
+- **The median tile is omitted entirely when hidden**, rather than showing a
+  placeholder. Nothing asserts the *absence* of the tile's container in the DOM —
+  only that the "Not enough data" caption is absent — so a future change could
+  leave an empty box behind without failing a test.
+- **Two P6 files landed in the P5 commit.** `20240101000006_report_evidence_flag.sql`
+  and `src/components/agents/agent-mark.tsx` were swept into `8f28264` by an
+  over-broad `git add` during P5. They are on the remote already. I did not rewrite
+  public history to fix it; noting it instead.
+- **`db:seed-stats` creates 40 auth accounts.** Local only, and `pnpm db:reset`
+  removes them, but the account creation is slower than the rest of the script and
+  is the first thing to time out on a cold Docker stack.

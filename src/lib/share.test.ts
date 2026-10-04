@@ -2,18 +2,20 @@ import { describe, expect, it } from "vitest";
 
 import { canShareNatively, shareTargets } from "@/lib/share";
 
-const URL = "https://playbookhunt.test/p/cheaper-car-insurance";
+// Not named `URL`: that would shadow the global this file constructs to
+// parse the very URLs it is asserting on.
+const PAGE_URL = "https://playbookhunt.test/p/cheaper-car-insurance";
 const TITLE = "Compare like-for-like car insurance options before deciding whether to switch.";
 
 function target(channel: string) {
-  const found = shareTargets(URL, TITLE).find((item) => item.channel === channel);
+  const found = shareTargets(PAGE_URL, TITLE).find((item) => item.channel === channel);
   if (!found) throw new Error(`no share target for ${channel}`);
   return found;
 }
 
 describe("shareTargets", () => {
   it("offers every channel the brief lists, in order", () => {
-    expect(shareTargets(URL, TITLE).map((item) => item.channel)).toEqual([
+    expect(shareTargets(PAGE_URL, TITLE).map((item) => item.channel)).toEqual([
       "x",
       "instagram",
       "threads",
@@ -29,12 +31,12 @@ describe("shareTargets", () => {
     // twitter.com, not x.com: x.com/intent/tweet does not resolve, and the
     // failure mode is a share box with no text in it.
     expect(href.startsWith("https://twitter.com/intent/tweet?")).toBe(true);
-    expect(new URL(href).searchParams.get("url")).toBe(URL);
+    expect(new URL(href).searchParams.get("url")).toBe(PAGE_URL);
     expect(new URL(href).searchParams.get("text")).toBe(TITLE);
   });
 
   it("builds a Facebook sharer carrying the url", () => {
-    expect(new URL(target("facebook").href!).searchParams.get("u")).toBe(URL);
+    expect(new URL(target("facebook").href!).searchParams.get("u")).toBe(PAGE_URL);
   });
 
   it("puts the text and url in the Threads text parameter", () => {
@@ -43,14 +45,14 @@ describe("shareTargets", () => {
     const href = target("threads").href!;
     const text = new URL(href).searchParams.get("text")!;
     expect(text).toContain(TITLE);
-    expect(text).toContain(URL);
+    expect(text).toContain(PAGE_URL);
     expect(new URL(href).searchParams.has("url")).toBe(false);
   });
 
   it("puts the text and url in the WhatsApp text parameter", () => {
     const text = new URL(target("whatsapp").href!).searchParams.get("text")!;
     expect(text).toContain(TITLE);
-    expect(text).toContain(URL);
+    expect(text).toContain(PAGE_URL);
   });
 
   it("has no href for Instagram and TikTok", () => {
@@ -72,7 +74,9 @@ describe("shareTargets", () => {
     const href = target("x").href!;
     // A bare `&` in the promise would otherwise end the `text` parameter early
     // and truncate the message at the ampersand.
-    const awkward = shareTargets(URL, "Save money & time — fast").find((t) => t.channel === "x")!;
+    const awkward = shareTargets(PAGE_URL, "Save money & time — fast").find(
+      (t) => t.channel === "x",
+    )!;
     expect(new URL(awkward.href!).searchParams.get("text")).toBe("Save money & time — fast");
     expect(href).not.toBe("");
   });

@@ -145,4 +145,28 @@
   a[role="button"] {
     touch-action: manipulation;
   }
+
+  /*
+   * The numbered circles on the detail page's steps.
+   *
+   * A CSS counter rather than a rendered `{index + 1}`, so the visible number
+   * cannot disagree with the list's real order after a step is inserted or
+   * removed — and so the `<ol>` itself stays the single source of ordering,
+   * which is what a screen reader announces.
+   *
+   * `counter-increment` on the `li`, not on the badge, so the counter advances
+   * once per step regardless of how much markup a step ends up containing.
+   */
+  ol.steps {
+    counter-reset: step;
+    list-style: none;
+  }
+
+  ol.steps > li {
+    counter-increment: step;
+  }
+
+  ol.steps > li > .steps-counter::before {
+    content: counter(step);
+  }
 }

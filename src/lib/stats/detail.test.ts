@@ -102,6 +102,21 @@ describe("workedTile", () => {
 });
 
 describe("medianTile", () => {
+  /**
+   * The median's text, or a thrown assertion.
+   *
+   * Written as a helper rather than a non-null assertion so that a test reaching
+   * for `.text` on a hidden tile fails with a clear message about the threshold
+   * instead of a property error.
+   */
+  function text(overrides: Partial<DetailStats>): string {
+    const tile = medianTile(stats(overrides));
+    if (tile.kind !== "value") {
+      throw new Error(`expected a median, got "${tile.kind}" (n = ${overrides.amount_n ?? 90})`);
+    }
+    return tile.text;
+  }
+
   it("hides below the amount threshold", () => {
     expect(medianTile(stats({ amount_n: 9, median_amount: 18 })).kind).toBe("hidden");
   });
@@ -115,14 +130,14 @@ describe("medianTile", () => {
   });
 
   it("uses the monthly suffix from the playbook's own outcome type", () => {
-    expect(medianTile(stats()).text).toBe("$18/mo");
-    expect(medianTile(stats({ outcome_type: "money_yearly" })).text).toBe("$18/yr");
-    expect(medianTile(stats({ outcome_type: "money_once" })).text).toBe("$18");
+    expect(text({})).toBe("$18/mo");
+    expect(text({ outcome_type: "money_yearly" })).toBe("$18/yr");
+    expect(text({ outcome_type: "money_once" })).toBe("$18");
   });
 
   it("reads hours for a time outcome", () => {
-    expect(medianTile(stats({ outcome_type: "time_hours", median_amount: 3 })).text).toBe("3 hrs saved");
-    expect(medianTile(stats({ outcome_type: "time_hours", median_amount: 1 })).text).toBe("1 hr saved");
+    expect(text({ outcome_type: "time_hours", median_amount: 3 })).toBe("3 hrs saved");
+    expect(text({ outcome_type: "time_hours", median_amount: 1 })).toBe("1 hr saved");
   });
 
   it("reports how many amounts the median rests on", () => {

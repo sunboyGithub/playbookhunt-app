@@ -127,7 +127,7 @@ export type MedianTile =
   | { kind: "value"; text: string; n: number; caption: string }
   | { kind: "hidden"; n: number; caption: string };
 
-function moneySuffix(outcomeType: DetailStats["outcome_type"]): string {
+function moneySuffix(outcomeType: DetailStats["outcome_type"] | undefined): string {
   switch (outcomeType) {
     case "money_monthly":
       return "/mo";
@@ -290,6 +290,30 @@ export function last30Line(
     percent: Math.round(toNumber(raw) * 100),
     caption: `Last 30 days · n = ${reportsInLast30Days.toLocaleString("en-US")} reports`,
   };
+}
+
+/**
+ * Narrow a stored `outcome_type` to the union, or null.
+ *
+ * The column is `text` with a check constraint, so the generated type says
+ * `string` and only the database enforces the list. Casting the value would
+ * assert the constraint holds — which it does today, and which a hand-edited row
+ * could break, and which would then put `$18` on a `time_hours` median. Narrowing
+ * it means an unknown value reads as "no outcome type" and the formatter falls
+ * back rather than rendering a unit that belongs to a different outcome.
+ */
+const OUTCOME_TYPES = [
+  "money_monthly",
+  "money_yearly",
+  "money_once",
+  "time_hours",
+  "binary",
+] as const;
+
+export function toOutcomeType(value: string | null | undefined): DetailStats["outcome_type"] {
+  return (OUTCOME_TYPES as readonly string[]).includes(value ?? "")
+    ? (value as DetailStats["outcome_type"])
+    : null;
 }
 
 export { AMOUNT_THRESHOLD, REPORT_THRESHOLD };

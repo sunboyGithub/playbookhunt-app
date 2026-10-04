@@ -1172,3 +1172,185 @@ asserted that the mock is correct.
 - **Muse prefill is entirely unexercised.** With `launch_url_template` NULL there
   is no code path in production that reaches `mode: "prefill"`. It is unit-tested
   but has never run against a real agent URL, because none is verified.
+
+---
+
+## P8 — Accounts, sign-in, saving, reporting, `/me`
+
+**Status:** complete. All six acceptance checks green.
+
+### What was built
+
+**Sign-in that works the way the brief describes it.** `/login` offers the three
+providers and the email link. All four land on `/auth/callback`, which exchanges
+the PKCE `?code=` server-side and sets cookies there — the browser never holds a
+token. `SignInResume` reads `?error_description=` and strips it from the URL
+before rendering, so a refused provider shows one sentence rather than GoTrue's
+JSON. Sign-out is a server action that deletes the cookies and redirects home.
+
+**`profiles.reminders_enabled`.** Migration `20240101000010` adds the column with
+a `true` default and a table-level UPDATE revoke from both `anon` and
+`authenticated`, re-granting `authenticated` only `handle`, `display_name`,
+`avatar_url` and `reminders_enabled`. Column-level, not table-level: a reader who
+could write their own `role` column would be an admin.
+
+**Saving.** `toggleSave` is a server action with an optimistic star. The star is
+optimistic because the alternative — a star that does not move until a round trip
+— reads as broken; it survives a reload because it was a row, not a piece of
+state.
+
+**Reporting.** `/p/[slug]/report`, one form, `result` the only required field. It
+serves two audiences: the reader who just used the try flow, and somebody who
+arrived from `/report` with no playbook in hand. Submit files `pending`, applies
+the amount cap as a **moderation flag** rather than a validation error, and
+redirects to `/report/respond/[token]` — a signed, single-purpose link that lets
+the filer correct the number for 24 hours without an account.
+
+**The report list at `/report`.** Playbooks a reader has an open, expired or
+answered report on. `/report/expired` explains what happened; the reminders cron
+mails one link back to the form, once, and never re-sends.
+
+**`/me`.** Three tabs — Saved, Tried, Reported — as links, not client state, so
+the tab survives a reload, the back button and a copied URL. Each card shows when
+it was saved, tried or reported, a "Updated since you saved" badge when the
+playbook has moved on, and — the one thing the list exists to nudge — a "Did it
+work? Report" button on a card that is tried but not reported. A fourth tab,
+Settings, holds the reminders switch.
+
+**Follow-ups.** `src/lib/followups/` mints HMAC-signed, expiring tokens.
+`/api/cron/followups` is the Vercel cron entry (`vercel.json`, hourly at :17),
+guarded by `CRON_SECRET`, and refuses to run at all when `FOLLOWUP_SECRET` is
+blank rather than half-sending a batch of mails containing dead buttons.
+
+### Checks and results
+
+| Check | Result |
+| --- | --- |
+| `pnpm lint` | **Pass** — no findings, no warnings |
+| `pnpm typecheck` | **Pass** — no errors |
+| `pnpm test` | **Pass** — 357/357 across 22 files (was 234/15) |
+| `pnpm test:db` | **Pass** — 69 tests across 4 files (was 51/3) |
+| `pnpm build` | **Pass** — 26 routes, Proxy registered |
+| `pnpm test:e2e` | **Pass** — 118 passed, 8 skipped, 0 failed (was 104/8) |
+
+The 8 skipped are the navigation-regression spec, which requires
+`E2E_TARGET=prod` and says why in the file: on the dev server the gap it measures
+is dominated by on-demand compile time.
+
+### Three real bugs this milestone found
+
+**1. `anon` held UPDATE on every column of `profiles`.** Supabase's default
+privileges give `anon` a table-level UPDATE, and the revoke written for the
+original migration only named `authenticated`. The `id = auth.uid()` policy still
+held — but only because an anonymous JWT carries no `sub`, so the predicate
+matched no rows. That is a policy accidentally doing the work of a grant. Anyone
+who later adds a JWT field that is present-but-null for anonymous callers turns
+that into a writable column. Fixed in `20240101000010` and asserted in
+`004_p8_accounts.sql`.
+
+**2. Every report on a money playbook was rejected.** The form keeps one amount
+field and renders either the money input or the hours input from it, so it sends
+whatever was typed under *both* `amount` and `hoursSaved`. The schema demanded
+`z.null()` on the key that did not apply, so a reader who filled in "$83 saved"
+got `Invalid input: expected null, received string` and lost the whole report.
+A whole outcome type, gone, over a field they were never shown. Fixed
+symmetrically — a value offered to a playbook that does not collect that unit is
+discarded, not refused — with a regression test in each direction.
+
+**3. `outcome_reports.user_id` has no client SELECT grant, on purpose.** The RLS
+test that asserted "a reader may correct their own number" could not be written as
+`where user_id = auth.uid()`, because that predicate itself needs to read the
+column. It is written as an id-keyed `update … returning`, which is also a truer
+statement of what the reader is allowed to do.
+
+### A test that was passing for the wrong reason
+
+`me-and-report.spec.ts` asserted `me-card` had the right slug after clicking the
+Tried tab. That assertion also passes on the Saved tab, which holds the same
+playbook — so it was asserting nothing about the tab it named, and the real
+failure underneath it (`me-report-cta` never appeared on mobile) was being
+diagnosed as a database problem.
+
+It was not a database problem. The copy button logs the try **without awaiting
+it** — deliberately, so an analytics insert can never delay somebody taking their
+prompt — and a request still in flight when the browser navigates is cancelled
+with the page. On the slower viewport the test navigated before the insert
+dispatched, and the try event was genuinely gone. Measured directly: leave the
+page in place and the row lands within a second; navigate immediately and there is
+no row at all, ever.
+
+The fix is in the test, not the product: wait for the write, then navigate. Waiting
+is now attributed to the reader (`copiedActionsFor(email, …)`) rather than to the
+slug, because with the desktop and mobile projects running in parallel "somebody
+logged a copy" is not "this reader logged a copy". The same race was later found
+in the reminders switch — optimistic switch, immediate `reload()`, preference
+silently back on — and fixed the same way, by waiting for the action's toast.
+
+The behaviour itself is recorded as known rather than papered over: a reader who
+copies a prompt and navigates away in the same instant is not logged as having
+tried it, and so is not nudged to report. That is a trade, not an oversight.
+
+### What to inspect in the browser
+
+1. **`/login`** — three providers and an email field. Submit the email; Mailpit
+   at `http://127.0.0.1:54324` receives the message within a second or two. The
+   screen says "check your email" and names the address.
+2. **Follow the link in Mailpit** — you land on `/me`, signed in. Reload: still
+   signed in. `/me` before signing in redirects to `/login?next=%2Fme`.
+3. **A refused provider** — visit `/auth/callback?error=access_denied&error_description=Email+link+is+invalid`.
+   One sentence, and the parameters are gone from the address bar afterwards.
+4. **`/p/lower-your-internet-bill`** — save it. The star fills; reload and it is
+   still filled. `STAR` on the card should now read **Saved**.
+5. **`/me`** — Saved 1. Then try the playbook from the card and copy the prompt.
+   Back to `/me`, Tried tab: the same card, with a **Did it work? Report** button
+   on it. That button is the whole point of the page.
+6. **`/p/lower-your-internet-bill/report`** — press **It worked**, type `83`,
+   submit. You must land on a confirmation, not a share sheet. The saved report is
+   editable from `/me` for 24 hours and can be deleted at any time.
+7. **Report again from the same account** — the CTA must be **gone** from the card,
+   because the question now has an answer.
+8. **Settings tab** — flip the reminders switch, reload. It must stay off. Turn it
+   off and check `/api/cron/followups` with no `Authorization` header: 401 or 503,
+   never a batch of mails.
+9. **390×844** — the whole walk. The account menu is inside the sheet on a phone,
+   not in the header.
+
+### Deliberate deviations, stated
+
+- **The amount cap is a moderation threshold, not a validation rule.** A reader
+  who genuinely saved $700 on a $5,000/month playbook gets their report filed as
+  `pending` + `is_outlier` for review. Refusing it would produce a smaller number
+  that neither of them believes, which is worse for the median than a large one
+  flagged.
+- **`/me` tabs are links.** Client state would make the back button lie and the
+  URL uncopyable, for a page whose entire value is "show me my things".
+- **Deleting a report has no window; editing one does.** Editing is a correction
+  to a number that is about to be published in a median, so it is bounded at 24
+  hours by the database. Deletion is a withdrawal, and a countdown on it is a
+  small cruelty.
+- **The unsubscribe link is in the HTML alternative as well as the text part.**
+  A one-click unsubscribe is a regulatory requirement, and a link only in the
+  plain-text part does not count for every mail client.
+
+### Blocks and unverified criteria
+
+- **Email delivery has never actually sent a message.** Resend is called over its
+  REST API with hand-written HTML, because `pnpm add resend @react-email/*` was
+  refused by the tool classifier and AGENTS.md requires asking before adding a
+  major dependency. That deviation is **owed a decision from the project owner**:
+  either approve the three packages, or accept the hand-written templates as the
+  shape of the thing. Everything is unit-tested against recorded fixtures; nothing
+  has been through a real inbox.
+- **The cron job has never run against a real queue.** It runs locally, produces
+  signed links, and refuses to run without `FOLLOWUP_SECRET` — but "one email,
+  once, and never again" has not been observed end to end through Resend.
+- **`resend_enabled` is off unless `RESEND_API_KEY` is set**, so on a machine
+  without it every mail is logged and dropped. That is the safe default and it
+  also means a green local run says nothing about delivery.
+- **`revalidate = 300` is still inert** (carried from P6).
+- **`/api/revalidate` is still unauthenticated.** Deferred to P9.
+- **The try event lost on immediate navigation is not fixed**, only recorded. See
+  the section above.
+- **The privacy test proves the two actions this milestone calls take no field
+  values.** It cannot prove a future third action would not; nothing structural
+  stops someone adding a parameter.

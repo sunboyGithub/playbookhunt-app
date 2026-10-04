@@ -1,86 +1,116 @@
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
+import { useCallback, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Star } from "lucide-react";
+import { toast } from "sonner";
 
+import { SignInModal } from "@/components/auth/sign-in-modal";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { toggleSave } from "@/app/actions/toggle-save";
+import { rememberPendingAction } from "@/lib/auth/pending-action";
 
 /**
  * "☆ Save" / "★ Saved".
  *
- * Auth arrives in P8, so this is deliberately half-built and I want to be
- * explicit about which half. The *control* is complete: it renders both states,
- * it is reachable from the keyboard, and when there is no session it opens the
- * sign-in dialog with the title the brief specifies. What it does not do is
- * pretend to save.
+ * Signed out, it opens the sign-in panel with `reason="save"` and a pending
+ * action pointing at this playbook, so a reader who signs in lands back here
+ * with the star already lit. Signed in, it writes to `saves`.
  *
- * The alternative — flipping to "★ Saved" and firing a toast, with nothing
- * persisted — would pass a screenshot and fail on reload. A reader who closes
- * their laptop has lost the thing they were told they'd kept, and a save list
- * that forgets is worse than no save list at all because it lied about being
- * one. So the button says what is true: sign in, and it will save.
- *
- * `SaveToggle` below is the seam P8 fills: once `getSession()` returns a user,
- * the same button writes to `saves` and the dialog becomes unreachable.
+ * The optimistic flip is deliberate and is reverted on failure. A star that took
+ * a server round-trip to appear feels broken, and one that appears and then
+ * silently reverts is worse than one that waited — so the revert is announced
+ * rather than just drawn.
  */
-export function SaveButton({ signedIn }: { signedIn: boolean }) {
-  const [dialogOpen, setDialogOpen] = useState(false);
-
-  // Unreachable until P8 supplies a session. Kept as an explicit early return
-  // rather than a comment, so it cannot be mistaken for working behaviour.
-  if (!signedIn) {
-    return (
-      <>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setDialogOpen(true)}
-          data-testid="save-button"
-        >
-          <Star aria-hidden />
-          Save
-        </Button>
-
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              {/* Exact title from the brief. A sign-in dialog whose heading is
-                  "Welcome back" does not tell the reader why they are being
-                  asked to sign in at all. */}
-              <DialogTitle>Sign in to save this playbook</DialogTitle>
-              <DialogDescription>
-                Saved playbooks live in My playbooks, so you can come back to them on any device.
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter>
-              <Button asChild className="rounded-full">
-                <Link href="/login?next=/p">Sign in</Link>
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </>
-    );
+export function SaveButton({
+  signedIn,
+  saved: initiallySaved,
+  playbookId,
+}: {
+  signedIn: boolean;
+  /** Whether this reader has already saved it. False when signed out. */
+  saved?: boolean;
+  playbookId: string;
+}) {
+  const [saved, setSaved] = useState(initiallySaved ?? false);
+  // Tracked so a change to the prop can be adopted during render rather than in
+  // an effect. Setting state in an effect body is a cascading render, and the
+  // React Compiler rejects it outright; this is the documented pattern for
+  // "state derived from a prop that can change" and costs one extra render only
+  // when the prop actually moved.
+  const [lastInitial, setLastInitial] = useState(initiallySaved);
+  if (initiallySaved !== lastInitial) {
+    setLastInitial(initiallySaved);
+    setSaved(initiallySaved ?? false);
   }
 
-  return <SaveToggle />;
-}
+  const [busy, setBusy] = useState(false);
+  const [signInOpen, setSignInOpen] = useState(false);
+  const router = useRouter();
 
-/** The signed-in state. Wired in P8 alongside the session. */
-function SaveToggle() {
+  // The server may know something the first render did not — the reader saved
+  // it in another tab, or signed in elsewhere. The render-time adoption above
+  // picks that up without fighting the reader's own click.
+
+  const onClick = useCallback(async () => {
+    if (!signedIn) {
+      rememberPendingAction({
+        action: "save",
+        playbookId,
+        returnTo: window.location.pathname,
+        scrollY: window.scrollY,
+      });
+      setSignInOpen(true);
+      return;
+    }
+
+    const next = !saved;
+    setSaved(next);
+    setBusy(true);
+
+    const result = await toggleSave({ playbookId, saved });
+
+    if (!result.ok) {
+      setSaved(!next);
+      toast.error("Couldn't save that. Try again.");
+    } else {
+      toast.success(next ? "Saved to My playbooks" : "Removed from My playbooks", {
+        action: next
+          ? { label: "View saved", onClick: () => router.push("/me") }
+          : undefined,
+      });
+      // The evidence line and the star on other cards are both server-rendered
+      // from the same save, so a refresh is what makes them agree.
+      router.refresh();
+    }
+
+    setBusy(false);
+  }, [playbookId, router, saved, signedIn]);
+
   return (
-    <Button variant="outline" size="sm" aria-pressed={false} data-testid="save-button">
-      <Star aria-hidden />
-      Save
-    </Button>
+    <>
+      <Button
+        variant="outline"
+        size="sm"
+        aria-pressed={signedIn ? saved : undefined}
+        onClick={() => void onClick()}
+        disabled={busy}
+        className={signedIn && saved ? "border-brand/40 bg-brand/5" : undefined}
+        data-testid="save-button"
+        data-saved={signedIn && saved ? "true" : "false"}
+      >
+        <Star aria-hidden className={signedIn && saved ? "fill-brand text-brand" : undefined} />
+        {signedIn && saved ? "Saved" : "Save"}
+      </Button>
+
+      {!signedIn ? (
+        <SignInModal
+          reason="save"
+          playbookId={playbookId}
+          open={signInOpen}
+          onOpenChange={setSignInOpen}
+        />
+      ) : null}
+    </>
   );
 }

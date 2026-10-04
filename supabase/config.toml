@@ -157,11 +157,30 @@ max_indexes = 5
 enabled = true
 # The base URL of your website. Used as an allow-list for redirects and for constructing URLs used
 # in emails.
-site_url = "http://127.0.0.1:3000"
+site_url = "http://localhost:3000"
 # The public URL that Auth serves on. Defaults to the API external URL with `/auth/v1` appended.
 # external_url = ""
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
-additional_redirect_urls = ["https://127.0.0.1:3000"]
+#
+# Every origin the app can actually be served from during development, because a
+# magic link is refused by any origin not on this list. `localhost` and
+# `127.0.0.1` are listed separately on purpose: they are different origins to a
+# browser even though they resolve to the same machine, so listing one does not
+# cover the other. `0.0.0.0` is here because `next dev --hostname 0.0.0.0` (used to
+# open the app on a phone on the same wifi, which is the only honest way to check
+# a 390x844 layout) makes the *browser's* origin the LAN address — add your own
+# `http://<lan-ip>:3000` here when you do that.
+#
+# Changing this requires restarting the local stack (`supabase stop && supabase
+# start`). It is read at boot, not per request. Do NOT use `db reset` for this —
+# that rebuilds the database and throws away every playbook, report and seed.
+additional_redirect_urls = [
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  "http://0.0.0.0:3000",
+  "http://localhost:3001",
+  "http://127.0.0.1:3001",
+]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
 # JWT issuer URL. If not set, defaults to auth.external_url.

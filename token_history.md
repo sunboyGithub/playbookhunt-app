@@ -59,6 +59,7 @@ used to derive per-milestone usage.
 | P5 | unavailable | unavailable | unavailable |
 | P6 | unavailable | unavailable | unavailable |
 | P7 | unavailable | unavailable | unavailable |
+| P8 | unavailable | unavailable | unavailable |
 
 ---
 
@@ -337,6 +338,64 @@ whether the server under test was the one I thought it was.
 
 The cheap checks — lint, typecheck, unit tests — caught none of this. They were
 green throughout.
+
+
+### P8 — Accounts, sign-in, saving, reporting, `/me`
+
+**Tokens: unavailable. No measurement source.** Same position as P0–P7. No
+`/cost`, no OpenRouter total, no counter that survives a context compaction. The
+table entry stays `unavailable` and no estimate has been substituted.
+
+This milestone is the first where a *large* share of the cost is knowable in
+shape while remaining unknowable in number, and the shape is the same as P7: the
+expensive part was verification, not authorship. The suite grew by 14 e2e tests,
+123 unit tests and 18 database tests, and three product defects were found that
+nothing short of running the thing would have surfaced.
+
+**The most expensive single stretch was a wrong diagnosis held for a long time.**
+The `me-report-cta` failure on mobile was investigated as a database problem —
+the `/me` query, the RLS policy, the try-event insert — across several iterations,
+each with a plausible theory. It was none of those. Reading the actual page
+content rather than the assertion message showed `Tried 0` and `Saved 1`: the try
+event was never written, because the copy button logs without awaiting and the
+test navigated before the request dispatched. That is the P5 lesson arriving for
+the fourth time, and it is the one worth restating because I broke it again in a
+new way: **I blamed the system under test instead of the thing I had changed.**
+The `toPass` retry loop I added to paper over the flake was, in effect, an edit to
+the test to make the test pass, which is the exact failure the user called out in
+P5.
+
+The honest accounting of that stretch is that most of it bought nothing. What
+finally worked was a probe — "leave the page in place and watch the table; then
+navigate immediately and watch it again" — which is the same move that found the
+PostgREST embed failure in P3. It took two minutes and settled in one direction
+what an hour of theorising had not.
+
+**A repeat of the repeat.** Three bugs this milestone were invisible to `lint`,
+`typecheck`, `tsc` and the unit suite, all of which stayed green throughout:
+
+- `anon` holding UPDATE on every column of `profiles` — a grant, not a code path.
+- the `hoursSaved` schema rejection — two unit-tested schemas meeting one form
+  that sends the same value under both keys, an interaction no unit test covers.
+- the missing `FOLLOWUP_SECRET` guard — a misconfiguration that would have
+  half-sent a batch of mails with dead buttons in them, and only on a machine
+  where that variable happens to be blank.
+
+The second is the interesting one. Both sides had tests. What was untested was
+the *wiring* between them, and that is the class of defect this project keeps
+paying for. Three milestones running now (P6, P7, P8), the finding has been the
+same every time: a test proves the component is right, or the schema is right, or
+the policy is right, and the bug lives in the seam.
+
+**One more cost worth naming, because it is not token cost.** Two tool calls in
+this milestone tried to `curl` and print a Mailpit message body, and the safety
+classifier refused both: printing the message would materialise a live magic-link
+token. That refusal was correct and I did not work around it — the diagnostic was
+redacted down to URL paths and parameter names, which was enough to find the real
+bug (`&amp;` entity encoding in GoTrue's HTML template, which had produced a link
+whose parameters were named `amp;type`). The lesson is worth carrying: a redaction
+is usually still diagnostic, and refusing to work around the refusal is what makes
+the refusal cheap.
 
 
 ---

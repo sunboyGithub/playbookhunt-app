@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { grantClipboard } from "./support/browser";
 import { adminClient, copiedActionsSince } from "./support/db";
 
 /**
@@ -29,14 +30,6 @@ const TYPED = {
   plan: "Gigabit",
   tenure: "4 years",
 } as const;
-
-async function grantClipboard(page: Page) {
-  const isWebKit = page.context().browser()?.browserType().name() === "webkit";
-
-  await page.context().grantPermissions(
-    isWebKit ? ["clipboard-read"] : ["clipboard-read", "clipboard-write"],
-  );
-}
 
 /** Open the try flow, from whichever trigger this viewport actually shows. */
 async function openTryFlow(page: Page) {

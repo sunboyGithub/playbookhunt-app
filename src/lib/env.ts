@@ -17,6 +17,21 @@ const serverSchema = z.object({
   // Server-only. Never exposed to the browser.
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
 
+  // Shared secret Vercel Cron sends as `Authorization: Bearer …`. Absent means
+  // the follow-up route refuses every request, which is the safe default: an
+  // unauthenticated cron route is an open relay for the whole site's mail.
+  CRON_SECRET: z.string().min(1).optional(),
+
+  // Signs the one-click links in a follow-up email. Separate from
+  // CRON_SECRET because the two have different blast radii: this one is
+  // embedded in a URL that ends up in inboxes, webcrawlers and clipboard
+  // history, and rotating the cron secret should not invalidate a week of
+  // outstanding reminders.
+  FOLLOWUP_SECRET: z.string().min(1).optional(),
+
+  // Verified sender for every transactional email.
+  RESEND_FROM: z.string().min(1).optional(),
+
   // Arriving in later prompts.
   RESEND_API_KEY: z.string().min(1).optional(),
   NEXT_PUBLIC_POSTHOG_KEY: z.string().min(1).optional(),
@@ -60,6 +75,9 @@ const KEYS = [
   "NEXT_PUBLIC_SUPABASE_URL",
   "NEXT_PUBLIC_SUPABASE_ANON_KEY",
   "SUPABASE_SERVICE_ROLE_KEY",
+  "CRON_SECRET",
+  "FOLLOWUP_SECRET",
+  "RESEND_FROM",
   "RESEND_API_KEY",
   "NEXT_PUBLIC_POSTHOG_KEY",
   "SENTRY_DSN",

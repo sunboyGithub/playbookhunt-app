@@ -128,8 +128,14 @@ export function OutcomePreview({ url, title }: { url: string | null; title: stri
  * Placed after the evidence rather than before it, so a reader has just seen
  * other people's outcomes and is being asked for their own. Asking first reads
  * as a request for free labour.
+ *
+ * The button is now a dialog rather than a link to `/report`. `/report` — a
+ * bare "which playbook?" form — is the header's entry point for someone who
+ * arrives without a playbook in mind, and it is out of scope here; the page the
+ * brief does specify for this moment is the dialog, with
+ * `/p/[slug]/report` behind it for the linkable case.
  */
-export function ReportCta() {
+export function ReportCta({ action }: { action: React.ReactNode }) {
   return (
     <section
       aria-labelledby="did-it-work-heading"
@@ -141,9 +147,16 @@ export function ReportCta() {
       <p className="mt-1 text-sm text-muted-foreground">
         Takes 30 seconds. Your report is the only way the next person finds out.
       </p>
-      <Button asChild className="mt-4 rounded-full bg-brand px-6 text-white hover:bg-brand/90">
-        <Link href="/report">Report your result</Link>
-      </Button>
+      <div className="mt-4">{action}</div>
     </section>
+  );
+}
+
+/** The default trigger, for a page that has no dialog to hand. */
+export function ReportCtaButton({ slug }: { slug: string }) {
+  return (
+    <Button asChild className="rounded-full bg-brand px-6 text-white hover:bg-brand/90">
+      <Link href={`/p/${slug}/report`}>Report your result</Link>
+    </Button>
   );
 }

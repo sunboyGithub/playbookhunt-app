@@ -18,7 +18,14 @@
  * late describes a reader who has left.
  */
 
-type EventName = "search" | "filter_changed" | "card_click" | "share" | "request_submitted";
+type EventName =
+  | "search"
+  | "filter_changed"
+  | "card_click"
+  | "share"
+  | "request_submitted"
+  | "report_opened"
+  | "report_submitted";
 
 type EventProps = Record<string, string | number | boolean | undefined>;
 
@@ -131,4 +138,38 @@ export function trackCardClick(slug: string, position: number): void {
  */
 export function trackShare(slug: string, channel: string): void {
   track("share", { slug, channel });
+}
+/**
+ * The report form was opened.
+ *
+ * Only the playbook's outcome *type*, which is already printed on the page the
+ * reader is looking at. Nothing about what they went on to type.
+ */
+export function trackReportOpened(outcomeType: string | null): void {
+  track("report_opened", { outcome_type: outcomeType ?? undefined });
+}
+
+/**
+ * A report was filed.
+ *
+ * The three properties the brief names: which of the three buttons, whether an
+ * amount was given, whether a file was attached.
+ *
+ * Notably absent: the amount, the note, the referral code, the provider. All
+ * four would be PII in a third-party analytics tool, and the amount in
+ * particular is the single number this site exists to publish — a copy of it in
+ * PostHog is a copy of it outside the database that governs it. `has_amount`
+ * answers the question the funnel actually asks ("how many people will file a
+ * number?") without carrying the number.
+ */
+export function trackReportSubmitted(input: {
+  result: string;
+  hasAmount: boolean;
+  hasEvidence: boolean;
+}): void {
+  track("report_submitted", {
+    result: input.result,
+    has_amount: input.hasAmount,
+    has_evidence: input.hasEvidence,
+  });
 }

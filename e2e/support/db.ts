@@ -89,6 +89,21 @@ export async function reportCountsBySlug(
 
 /** `action` values on `try_events` for one playbook since an ISO timestamp. */
 export async function copiedActionsSince(slug: string, since: string): Promise<string[]> {
+  return copiedActionsFor(null, slug, since);
+}
+
+/**
+ * The same, narrowed to one reader.
+ *
+ * Narrowing matters when the suite runs in parallel: every project copies the
+ * same playbook, so "somebody logged a copy" is not "this reader logged a copy",
+ * and a test that conflates the two passes on the other project's row.
+ */
+export async function copiedActionsFor(
+  email: string | null,
+  slug: string,
+  since: string,
+): Promise<string[]> {
   const supabase = adminClient();
   if (!supabase) {
     return [];
@@ -104,12 +119,40 @@ export async function copiedActionsSince(slug: string, since: string): Promise<s
     return [];
   }
 
-  const { data } = await supabase
+  let query = supabase
     .from("try_events")
     .select("action")
     .eq("playbook_id", playbook.id)
     .eq("action", "copied")
     .gte("created_at", since);
 
+  if (email) {
+    const userId = await authUserId(email);
+    // A reader we cannot resolve is not a reader whose rows we may assume.
+    if (!userId) {
+      return [];
+    }
+    query = query.eq("user_id", userId);
+  }
+
+  const { data } = await query;
+
   return (data ?? []).map((row) => row.action as string);
+}
+
+/**
+ * The `auth.users` id for an address, or null.
+ *
+ * There is no lookup by address in the admin API, so this pages the list. The
+ * page size is the maximum the endpoint accepts, which keeps a suite that has
+ * created a few hundred test accounts down to a single round trip.
+ */
+export async function authUserId(email: string): Promise<string | null> {
+  const supabase = adminClient();
+  if (!supabase) {
+    return null;
+  }
+
+  const { data } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
+  return data.users.find((user) => user.email === email)?.id ?? null;
 }

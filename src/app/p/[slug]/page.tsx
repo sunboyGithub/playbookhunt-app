@@ -5,8 +5,11 @@ import { ChevronRight } from "lucide-react";
 
 import { AgentMark } from "@/components/agents/agent-mark";
 import { Audience, OutcomePreview, ReportCta, Steps } from "@/components/playbook/detail/audience";
+import { Button } from "@/components/ui/button";
 import { InputsList } from "@/components/playbook/detail/inputs-list";
 import { PromptBlock } from "@/components/playbook/detail/prompt-block";
+import { ReportDialog } from "@/components/report/report-dialog";
+import { reportFieldsFrom } from "@/lib/report/shape";
 import { ReportFilters } from "@/components/playbook/detail/report-filters";
 import { ReportList } from "@/components/playbook/detail/report-list";
 import { SaveButton } from "@/components/playbook/detail/save-button";
@@ -17,6 +20,7 @@ import { DetailSidebar } from "@/components/playbook/detail/sidebar";
 import { PlaybookCard } from "@/components/playbook-card";
 import { TryDialog } from "@/components/try/try-dialog";
 import { toTryFields } from "@/lib/try/fields";
+import { listSavedPlaybookIds } from "@/app/actions/toggle-save";
 import { getEnv } from "@/lib/env";
 import { createClient } from "@/lib/supabase/server";
 import type { DetailStats } from "@/lib/stats/detail";
@@ -272,6 +276,12 @@ export default async function PlaybookPage({ params, searchParams }: Props) {
   const { data: sessionData } = await supabase.auth.getUser();
   const signedIn = Boolean(sessionData.user);
 
+  // Whether *this* reader has starred it, which is a different question from
+  // whether anyone can. Read here rather than in the button so the star's first
+  // render is right — a star that fills in a moment after the page paints reads
+  // as a save the reader did not make.
+  const savedHere = signedIn ? (await listSavedPlaybookIds([playbook.id])).length > 0 : false;
+
   const tryPanel = {
     playbookId: playbook.id,
     playbookSlug: playbook.slug,
@@ -311,7 +321,11 @@ export default async function PlaybookPage({ params, searchParams }: Props) {
             <div className="flex flex-wrap items-start gap-4">
               <h1 className="text-3xl font-semibold tracking-tight">{playbook.title}</h1>
               <div className="ml-auto flex items-center gap-2">
-                <SaveButton signedIn={false} />
+                <SaveButton
+                  signedIn={signedIn}
+                  saved={savedHere}
+                  playbookId={playbook.id}
+                />
                 <ShareMenu slug={playbook.slug} url={canonical} title={playbook.promise} />
               </div>
             </div>
@@ -395,7 +409,34 @@ export default async function PlaybookPage({ params, searchParams }: Props) {
               ) : null}
             </section>
 
-            <ReportCta />
+            <ReportCta
+              action={
+                <ReportDialog
+                  signedIn={signedIn}
+                  playbookId={playbook.id}
+                  playbookSlug={playbook.slug}
+                  versionId={content?.id ?? ""}
+                  title={playbook.title}
+                  shareUrl={canonical}
+                  outcomeType={stats.outcome_type}
+                  outcomeUnit={playbook.outcome_unit}
+                  reportFields={reportFieldsFrom(playbook.report_fields)}
+                  agents={agents.selectable.map((agent) => ({
+                    slug: agent.slug,
+                    name: agent.display_name,
+                  }))}
+                  defaultAgentSlug={null}
+                  trigger={
+                    <Button
+                      className="rounded-full bg-brand px-6 text-white hover:bg-brand/90"
+                      data-testid="report-open"
+                    >
+                      Report your result
+                    </Button>
+                  }
+                />
+              }
+            />
           </div>
         </main>
 

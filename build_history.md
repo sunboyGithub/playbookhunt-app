@@ -160,7 +160,8 @@ Dev server is running at **<http://localhost:3000>**.
 - **No placeholder route has a real page**, by design — that is P4–P12d.
 - **Design tokens are inferred where the brief is silent.** `AGENTS.md` does not
   specify body text colour, muted greys, or the focus ring. Values were chosen
-  to match the warm `#FAF9F6` surface. Revisit if a frame disagrees.
+  to match the warm `#FAF9F6` surface, then corrected against the design frames
+  in the P1 review entry below.
 - **⌘K, the avatar menu and sign-in are inert.** The search trigger is a
   non-functional button and "Sign in" is a plain link, because auth and the
   palette are P8 and P4.
@@ -173,4 +174,100 @@ Dev server is running at **<http://localhost:3000>**.
   required in CI. Noted in the README.
 - **`docs/` was not modified**, per the prompt. Brand and template copies were
   already present from P0.
+
+---
+
+## P1 review — design-frame corrections
+
+Not a new milestone. Findings from comparing the running shell against
+`docs/design/01a_homepage_top.png` and `01b_homepage_bottom.png`, after the
+owner reported visual mismatches.
+
+### Colour tokens sampled from the frames
+
+Values were read out of the PNGs with PIL rather than eyeballed. Flat fills are
+exact; text values are the mode of the darkest cluster, since antialiased glyphs
+fringe. Findings:
+
+| Role | Frame | `AGENTS.md` | Action |
+|---|---|---|---|
+| Page background | `#FAF9F6` | `#FAF9F6` | matched |
+| Card surface | `#FFFFFF` | `#FFFFFF` | matched |
+| Brand accent | `#FF5A1F` | `#FF5A1F` | matched |
+| Muse blue / dark / soft | `#2A66DE` / `#1D4FB8` / `#E8EFFC` | same | matched |
+| Worked green | `#16A34A` | `#16A34A` | matched |
+| Primary ink | `#1C1B19` | **unspecified** | adopted |
+| Secondary ink (nav, kit headings) | `#2A2926` | **unspecified** | within 8/255 of primary; no separate token |
+| Muted ink | `#66635D` (cluster `#625F59`–`#74716B`) | **unspecified** | kept `#6B675F`, inside the cluster |
+| Card/pill border | `#E5E3DE`; header hairline `#E6E4DF` | `#E7E5E0` | kept the brief's value |
+| Verified pill | `#DCFCE7` | **unspecified** | added as `--verified-bg` |
+| Category tints | `#EAF4EE` mint, `#EEF0F8` lavender, `#FBF1E6` peach | **unspecified** | added as `--tint-*` |
+| Skeleton rules | `#ECEAE4` | **unspecified** | added as `--skeleton` |
+| Illustration palette | `#566094` indigo, `#3E6356` green | **unspecified** | noted, not tokenised |
+
+The frames and the brief disagree by one or two units on every grey, consistently
+in the same direction. That reads as a colour-profile shift in the export rather
+than a different palette, so the brief wins wherever it speaks and the frames
+supply only what the brief is silent about. The frames are themselves labelled
+"illustrative data".
+
+### What changed
+
+- `--foreground` and the shadcn foreground aliases: `#1A1917` → `#1C1B19`, sampled.
+- Four new tokens for values the frames use and the brief omits (above).
+- **Header**, corrected against frame 01a: solid near-black Sign in button
+  instead of an outline; Create and Report as white outlined pills instead of
+  ghost; nav links in foreground ink rather than muted grey; fully-rounded pills
+  throughout; header background solid `#FAF9F6` instead of `bg-background/90`
+  with a backdrop blur.
+
+### Correction to an earlier note
+
+An earlier review claimed the search field was missing its magnifier icon. That
+was wrong — the icon was already there. It is visible in the frame at the left
+inside the field, and the component already rendered it there.
+
+### Checks and results
+
+| Check | Result |
+|---|---|
+| `pnpm typecheck` | **Pass** |
+| `pnpm lint` | **Pass** |
+| `pnpm test` | **Pass** — 7/7 |
+| `pnpm test:e2e` | **Pass** — 6/6 (was 4/4; see below) |
+| `pnpm build` | **Pass** — 17 routes |
+| Header screenshot vs frame 01a | Matches on button treatment, rounding, ink colour and hairline |
+
+### New e2e test: `renders with no console errors or hydration warnings`
+
+Fails on any console error, console warning or uncaught page error. Two reasons.
+First, a hydration mismatch surfaces *only* as a console error, so every other
+test in this file would stay green through one. Second, it pins down a
+confusing report: three errors the owner sees in a normal browser window —
+a React hydration mismatch showing `bis_skin_checked` / `bis_register`
+attributes, a `Cannot read properties of undefined (reading 'M_ID')` from
+`chrome-extension://eppiocemhmnlbhjplcgkofciiegomcon`, and
+`Failed to connect to MetaMask` from
+`chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn` — are all browser
+extensions, not application code. The first is Google Bisect rewriting the DOM
+before React hydrates, which Next.js documents as a cause of hydration errors;
+the other two are third-party extensions that the page never references.
+Playwright loads no extensions, and this test passes clean on both desktop and
+mobile. The fix for a noisy local console is an incognito window or disabling
+those extensions, not changing the app.
+
+### Still outstanding
+
+- **The homepage is still a placeholder.** Frame 01a differs from what is served
+  in almost every visible respect: centred bold H1, large centred search field
+  with the orange Search button inline, the `48 playbooks · 3,210 real results`
+  line, three sort tabs, a row of category pills, tinted cards, "Top playbooks
+  this week" and "Trending". All of that is P4, and the placeholder should not be
+  read as a design regression.
+- **Frame 01b's footer is not what is built**, deliberately. The frame shows
+  "Request a playbook" and "Create a playbook (beta)" plus the
+  "Numbers shown are illustrative…" tagline. `CURRENT_DESIGN.md` and
+  `AGENTS.md` replace that with the compact five-link footer that is served.
+- **Header container width** is `max-w-6xl` centred; the frame is full-bleed at
+  1440. Cosmetic, and left alone.
 

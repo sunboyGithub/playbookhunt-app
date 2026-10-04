@@ -53,6 +53,13 @@
   /* Meta-blue ring drawn around the Muse avatar (#0081FB). */
   --color-muse-ring: var(--muse-ring);
 
+  /* Per-category card tints and the verified pill. Not outcome colours. */
+  --color-tint-mint: var(--tint-mint);
+  --color-tint-lavender: var(--tint-lavender);
+  --color-tint-peach: var(--tint-peach);
+  --color-verified-bg: var(--verified-bg);
+  --color-skeleton: var(--skeleton);
+
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -64,22 +71,22 @@
 :root {
   /* Surfaces */
   --background: #faf9f6;
-  --foreground: #1a1917;
+  --foreground: #1c1b19;
   --card: #ffffff;
-  --card-foreground: #1a1917;
+  --card-foreground: #1c1b19;
   --popover: #ffffff;
-  --popover-foreground: #1a1917;
+  --popover-foreground: #1c1b19;
 
   /* Accent — primary CTA, "Hunt" wordmark */
   --primary: #ff5a1f;
   --primary-foreground: #ffffff;
 
   --secondary: #f2f0ec;
-  --secondary-foreground: #1a1917;
+  --secondary-foreground: #1c1b19;
   --muted: #f2f0ec;
   --muted-foreground: #6b675f;
   --accent: #f2f0ec;
-  --accent-foreground: #1a1917;
+  --accent-foreground: #1c1b19;
   --destructive: #dc2626;
 
   --border: #e7e5e0;
@@ -100,6 +107,21 @@
   --muse-dark: #1d4fb8;
   --muse-line: #c3d4f5;
   --muse-ring: #0081fb;
+
+  /*
+   * Sampled from docs/design/01a_homepage_top.png and 01b_homepage_bottom.png.
+   * These are card *accents*, not the outcome palette: a category is given a
+   * tinted band behind its header, and one of them carries its figures on top.
+   */
+  --tint-mint: #eaf4ee;
+  --tint-lavender: #eef0f8;
+  --tint-peach: #fbf1e6;
+
+  /* Verified pill — light green fill behind "✓ Verified 3d ago". */
+  --verified-bg: #dcfce7;
+
+  /* Skeleton / inert placeholder rules. */
+  --skeleton: #eceae4;
 
   /* Cards use 12–16px radii: --radius drives lg (12px) and xl (16px). */
   --radius: 0.75rem;

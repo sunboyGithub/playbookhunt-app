@@ -18,7 +18,9 @@ export function SiteHeader() {
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
-    <header className="sticky top-0 z-40 w-full border-b border-border bg-background/90 backdrop-blur">
+    // Frame 01a shows the header sitting directly on the page surface with a
+    // single hairline under it — no translucent blur bar.
+    <header className="sticky top-0 z-40 w-full border-b border-border bg-background">
       <div className="mx-auto flex h-14 w-full max-w-6xl items-center gap-4 px-4">
         <Logo />
 
@@ -28,7 +30,7 @@ export function SiteHeader() {
             <Link
               key={link.href}
               href={link.href}
-              className="rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              className="rounded-full px-3 py-2 text-sm font-medium text-foreground/90 transition-colors hover:bg-accent"
             >
               {link.label}
             </Link>
@@ -40,7 +42,7 @@ export function SiteHeader() {
         {/* Search trigger — the ⌘K palette is wired up in P4. */}
         <button
           type="button"
-          className="hidden h-9 w-56 items-center gap-2 rounded-lg border border-border bg-card px-3 text-sm text-muted-foreground transition-colors hover:bg-accent lg:flex"
+          className="hidden h-9 w-56 items-center gap-2 rounded-full border border-border bg-card px-3.5 text-sm text-muted-foreground transition-colors hover:bg-accent lg:flex"
         >
           <Search className="size-4" aria-hidden />
           <span>Search playbooks</span>
@@ -49,21 +51,26 @@ export function SiteHeader() {
           </kbd>
         </button>
 
-        <Button variant="ghost" size="sm" className="hidden md:inline-flex" asChild>
+        <Button variant="outline" size="sm" className="hidden rounded-full md:inline-flex" asChild>
           <Link href="/create">
             <Plus className="size-4" aria-hidden />
             Create a playbook
           </Link>
         </Button>
 
-        <Button variant="ghost" size="sm" className="hidden md:inline-flex" asChild>
+        <Button variant="outline" size="sm" className="hidden rounded-full md:inline-flex" asChild>
           <Link href="/search">
             <SquarePen className="size-4" aria-hidden />
             Report a result
           </Link>
         </Button>
 
-        <Button variant="outline" size="sm" className="hidden md:inline-flex" asChild>
+        {/* Solid near-black in the frame, not an outline. */}
+        <Button
+          size="sm"
+          className="hidden rounded-full bg-foreground text-background hover:bg-foreground/90 md:inline-flex"
+          asChild
+        >
           <Link href="/login">Sign in</Link>
         </Button>
 

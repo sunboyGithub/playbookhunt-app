@@ -7,6 +7,11 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
+      // `server-only` throws on import from a client bundle, which is the whole
+      // point of it. Under Vitest every module resolves as if it were the
+      // client, so importing a server module in a test would throw for no
+      // reason. Stubbing it keeps the guard intact in the app and testable here.
+      "server-only": fileURLToPath(new URL("./src/test/server-only-stub.ts", import.meta.url)),
     },
   },
   test: {

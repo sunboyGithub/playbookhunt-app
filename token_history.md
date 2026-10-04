@@ -53,6 +53,7 @@ used to derive per-milestone usage.
 |---|---|---|---|
 | P0 | unavailable | unavailable | unavailable |
 | P1 | unavailable | unavailable | unavailable |
+| P2 | unavailable | unavailable | unavailable |
 
 ---
 
@@ -107,6 +108,26 @@ defects surfaced only at runtime and each needed a fix-and-recheck cycle:
 
 Also spent effort on two Next.js 16 defaults that fight the brief: the
 auto-generated `AGENTS.md` block, and the `middleware` → `proxy` rename.
+
+### P2 — Database schema, RLS, types
+
+**Tokens:** unavailable. No measurement source; see the note at the top.
+
+This milestone was dominated by iteration against a live database rather than by
+writing files. Five defects were found by tests rather than by reading the code,
+and three of them were the kind that pass every static check:
+
+1. A trigger assigning a column the table does not have — which would have made
+   **every user signup fail** and was invisible to TypeScript.
+2. A policy left unscoped, so `anon` evaluated a subquery it had no grant for
+   and got a permission error where an empty result was correct.
+3. A reversed sort comparator. Correct types, correct inputs, opposite output.
+
+Each fix cost a migration, a reset and a test re-run. The loop that actually paid
+for itself was writing the RLS tests as SQL that impersonates a role, because
+that made "anon cannot do X" a runnable assertion instead of a claim. Every one
+of those five was caught by a test rather than by inspection.
+
 
 ---
 

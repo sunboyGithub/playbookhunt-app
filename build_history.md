@@ -271,3 +271,107 @@ those extensions, not changing the app.
 - **Header container width** is `max-w-6xl` centred; the frame is full-bleed at
   1440. Cosmetic, and left alone.
 
+---
+
+## P2 — Database schema, RLS, types
+
+**Status:** complete. `supabase db reset` applies cleanly; 36 pgTAP assertions pass.
+
+### What was built
+
+- **`supabase/migrations/20240101000000_init_schema.sql`** — every table the
+  brief names (plus a `feedback` table, which P12c needs and the brief requires
+  under Privacy). RLS on all of them, a `public_reports` view, both storage
+  buckets, column grants, and four helper functions.
+- **`supabase/migrations/20240101000001_seed_taxonomy.sql`** — the 8 categories
+  and 7 agents as a migration, so production gets them. All
+  `launch_url_template` values are null.
+- **`src/lib/database.types.ts`** — generated, and wired into all four Supabase
+  clients so a schema change breaks the build rather than the runtime.
+- **`src/server/queries/`** — `types.ts` (shared row types, thresholds, sort
+  options), `playbooks.ts` (`getPublishedPlaybookBySlug`, `listPlaybooks`,
+  `getVersionContent`, sorting, the "proven to work" eligibility query) and
+  `taxonomy.ts` (`getCategory`, `getCollection`, and the category/agent/kit/use
+  case lists).
+- **Scripts** — `db:types`, `db:reset`, `test:db`, `test:all`.
+- **Tests** — 14 schema assertions and 22 RLS assertions in pgTAP, plus 12 unit
+  tests over the sorting rules.
+
+### Design decisions worth knowing
+
+- **Sorting happens in JS, not SQL.** PostgREST cannot order by an embedded
+  resource, so `evidence_score` cannot be reached through a `stats` embed. The
+  alternative was denormalising the score onto `playbooks`, which would put the
+  ranking output in two places that could disagree. At ~48 rows the cost of
+  sorting here is nil.
+- **`user_id` is ungranted on `outcome_reports`.** Supabase grants table-level
+  `select` to anon by default, so that had to be revoked before the enumerated
+  column grant meant anything. This is what the acceptance criterion "anon cannot
+  read user_id on reports" actually turns on.
+- **`public_reports` is deliberately not `security_invoker`.** An invoker view
+  runs as anon, which cannot read `user_id` and so cannot evaluate its own join.
+  Granting that column to make it work would hand the identity straight back. It
+  runs as its owner instead, carries its own `status = 'approved'` filter in
+  place of RLS, and anon only ever selects derived columns.
+- **`owns_report()` mirrors `is_admin()`.** The evidence policies need to ask
+  "is this report mine?", which needs `user_id`. Resolving that in a
+  `SECURITY DEFINER` function keeps the column unreadable while still letting the
+  policy ask. Same reason `is_admin()` is not a plain `select role from profiles`.
+- **Row counts below a threshold filter in JS** for the same reason: filtering an
+  embedded relation server-side would drop every playbook with no stats row,
+  which before P9 is all of them.
+
+### Bugs the tests caught before anything shipped
+
+1. **`set_updated_at` on `profiles` would have broken every signup.** The
+   trigger assigned `new.updated_at`, but the brief gives `profiles` only
+   `created_at`. Every `auth.users` insert would have raised. Found by the RLS
+   test's own signup fixture.
+2. **The evidence policies were unreachable.** Left unscoped they applied to
+   PUBLIC, so anon evaluated a subquery against a table anon cannot read and got
+   a permission error instead of an empty result. Now scoped to
+   `authenticated`.
+3. **`playbook_agents` and `playbook_sources` hang off the playbook, not the
+   version.** A nested select under `playbook_versions` asked for a relation
+   that does not exist; TypeScript caught it. They are now a second query keyed
+   on `playbook_id`.
+4. **The sort comparator was reversed**, which silently ordered the homepage
+   worst-first. Caught by the unit tests.
+5. **The required-input trigger double-counted on update**, so re-saving an
+   already-required input would trip the two-input cap against itself.
+
+### Checks and results
+
+| Check | Result |
+|---|---|
+| `supabase db reset` | **Pass** — applies cleanly, no warnings |
+| `pnpm test:db` | **Pass** — 36/36 across 2 files |
+| `pnpm typecheck` | **Pass** |
+| `pnpm lint` | **Pass** |
+| `pnpm test` | **Pass** — 19/19 |
+| `pnpm build` | **Pass** — 17 routes |
+| `pnpm test:e2e` | **Pass** — 6/6 |
+
+### What to inspect in the browser
+
+- **<http://localhost:54323>** — Supabase Studio. Tables and views under
+  `public`. Expected: 8 categories, 7 agents, and **no playbooks** (P3 creates
+  them). A playbook here before P3 means scope drift.
+- **Table Editor → `public_reports`** — empty, and structurally unable to show a
+  reporter: the view exposes `display_name` and `display_initial`, never
+  `user_id`.
+- **Storage** — two buckets, `evidence` private and `previews` public.
+
+### Blocks and unverified criteria
+
+- **Nothing is committed to git and nothing is pushed.** `gh` is now installed
+  but is not authenticated, so `git push` cannot run until someone logs in.
+- **`playbook_stats` is empty and has no writer.** Every aggregate column exists
+  with a zero default; the job that fills them is P9. Until then `listPlaybooks`
+  returns rows with `stats: null`, which is the path the tests cover.
+- **The full-text search path is untested against real content.** `search_tsv` is
+  maintained by trigger and GIN-indexed, and pgTAP asserts the trigger exists,
+  but no content exists yet to search. P3 and P5 exercise it properly.
+- **Types were generated from the local database**, so they reflect local config.
+  Regenerate against the hosted project before the first deploy if the hosted
+  project's extensions differ.

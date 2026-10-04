@@ -58,6 +58,7 @@ used to derive per-milestone usage.
 | P4 | unavailable | unavailable | unavailable |
 | P5 | unavailable | unavailable | unavailable |
 | P6 | unavailable | unavailable | unavailable |
+| P7 | unavailable | unavailable | unavailable |
 
 ---
 
@@ -291,6 +292,52 @@ exercised stayed written down until something exercised it. The cheapest availab
 signal is still the same as in P5 — run the checks, read the actual error text
 rather than the summary line, and check the build output rather than the code's
 own comments.
+
+### P7 — Try flow and agent picker
+
+**Tokens: unavailable. No measurement source.**
+
+Same position as every milestone so far. No `/cost`, no provider total, no
+surviving session counter. The table entry stays `unavailable` and I have not
+substituted an estimate.
+
+This milestone is the first where the *shape* of the cost is knowable even though
+the number is not, and the shape is worth recording: it was dominated by
+diagnosis, not by construction. The bulk of the session went into two bugs that
+no existing check could see, and both were found only by running the thing
+against a real database rather than against a mock.
+
+**The expensive lesson, and it is a repeat.** Two production bugs survived a
+green suite:
+
+- `logTryEvent` returned `{ id: null }` on *every* call, because
+  `.insert().select()` re-reads the row under an admin-only SELECT policy. The
+  action swallows errors by design, so the symptom was invisible: the rows
+  landed, the UI looked correct, and only the follow-up linkage was silently
+  missing.
+- The `try_events` insert policy was `WITH CHECK (true)`, which let any caller —
+  including an anonymous one — attribute a try event to any account.
+
+I found the first only because I wrote the integration test the acceptance
+criteria asked for. I found the second only because that integration test failed
+in a way I did not expect, and I read the Postgres log instead of the assertion
+message. Both bugs are invisible to unit tests by construction: the first because
+the error is deliberately swallowed, the second because RLS is a database
+behaviour.
+
+So the marginal cost of this milestone was very nearly the cost of writing the
+test that the criteria already required. Skipping it would have shipped both bugs
+and saved most of the session. That is the same lesson P5 and P6 recorded, and it
+is now three for three.
+
+A smaller repeat: a stale `next dev` from an earlier session was serving a build
+from before a refactor, and 46 e2e tests failed against a page that returned 200
+when I curled it. Diagnosing that cost several iterations before I checked
+whether the server under test was the one I thought it was.
+
+The cheap checks — lint, typecheck, unit tests — caught none of this. They were
+green throughout.
+
 
 ---
 

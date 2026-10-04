@@ -15,10 +15,13 @@ import { StatTiles } from "@/components/playbook/detail/stat-tiles";
 import { WorkedBar } from "@/components/playbook/detail/worked-bar";
 import { DetailSidebar } from "@/components/playbook/detail/sidebar";
 import { PlaybookCard } from "@/components/playbook-card";
+import { TryDialog } from "@/components/try/try-dialog";
+import { toTryFields } from "@/lib/try/fields";
 import { getEnv } from "@/lib/env";
+import { createClient } from "@/lib/supabase/server";
 import type { DetailStats } from "@/lib/stats/detail";
 import { toOutcomeType } from "@/lib/stats/detail";
-import { formatVerified } from "@/lib/stats/format";
+import { formatEvidenceHeadline, formatVerified } from "@/lib/stats/format";
 import { nowMs } from "@/server/clock";
 import { getPublishedPlaybookBySlug, listRelatedPlaybooks } from "@/server/queries/playbooks";
 import { countReportsSince, listReportProviders, listReports } from "@/server/queries/reports";
@@ -177,11 +180,11 @@ function HowToJsonLd({
  * `aria-labelledby` for both.
  */
 function MobileTryBar({
-  tryHref,
   verifiedLabel,
+  children,
 }: {
-  tryHref: string;
   verifiedLabel: string | null;
+  children: React.ReactNode;
 }) {
   return (
     <div className="mt-5 flex flex-wrap items-center gap-3 lg:hidden">
@@ -193,13 +196,7 @@ function MobileTryBar({
           Verified {verifiedLabel}
         </span>
       ) : null}
-      <Link
-        href={tryHref}
-        className="inline-flex h-11 items-center rounded-full bg-brand px-6 text-base font-medium text-white"
-        data-testid="try-button-mobile"
-      >
-        Try this playbook
-      </Link>
+      {children}
     </div>
   );
 }
@@ -269,6 +266,28 @@ export default async function PlaybookPage({ params, searchParams }: Props) {
   const tryHref = `/p/${playbook.slug}/try`;
   const verified = formatVerified(playbook.last_verified_at, now);
 
+  // Whether to offer a reminder. Read here rather than in the sheet so the
+  // signed-out card is a decision the server makes and the client only renders.
+  const supabase = await createClient();
+  const { data: sessionData } = await supabase.auth.getUser();
+  const signedIn = Boolean(sessionData.user);
+
+  const tryPanel = {
+    playbookId: playbook.id,
+    playbookSlug: playbook.slug,
+    versionId: content?.id ?? null,
+    promise: playbook.promise,
+    inputs: toTryFields(content?.inputs ?? []),
+    promptTemplate: content?.prompt_template ?? "",
+    steps: content?.steps ?? [],
+    selectableAgents: agents.selectable,
+    comingSoonAgents: agents.coming_soon,
+    // The same headline the cards use, so the sheet cannot claim an evidence
+    // line the page beneath it is not allowed to show.
+    recommendedEvidence: formatEvidenceHeadline(playbook.stats),
+    signedIn,
+  };
+
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-6">
       {content && content.steps.length > 0 ? (
@@ -314,10 +333,16 @@ export default async function PlaybookPage({ params, searchParams }: Props) {
               <li>{timeRange}</li>
             </ul>
 
-            <MobileTryBar
-              tryHref={tryHref}
-              verifiedLabel={verified ? verified.replace(/^verified\s+/, "") : null}
-            />
+            <MobileTryBar verifiedLabel={verified ? verified.replace(/^verified\s+/, "") : null}>
+              <TryDialog panel={tryPanel}>
+                <span
+                  className="inline-flex h-11 items-center rounded-full bg-brand px-6 text-base font-medium text-white"
+                  data-testid="try-button-mobile"
+                >
+                  Try this playbook
+                </span>
+              </TryDialog>
+            </MobileTryBar>
           </header>
 
           <div className="mt-6 space-y-8">
@@ -386,8 +411,17 @@ export default async function PlaybookPage({ params, searchParams }: Props) {
           changelog={content?.changelog ?? null}
           lastVerifiedAt={playbook.last_verified_at}
           now={now}
-          tryHref={tryHref}
           triedCount={triedCount}
+          tryButton={
+            <TryDialog panel={tryPanel}>
+              <span
+                className="inline-flex h-11 w-full items-center justify-center rounded-full bg-brand text-base font-medium text-white"
+                data-testid="try-button"
+              >
+                Try this playbook
+              </span>
+            </TryDialog>
+          }
         />
       </div>
 

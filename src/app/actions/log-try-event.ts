@@ -3,6 +3,7 @@
 import { cookies } from "next/headers";
 
 import { createClient } from "@/lib/supabase/server";
+import { insertTryEvent } from "@/server/queries/try-events";
 
 /**
  * Log that someone did something with a playbook: opened the try flow, copied
@@ -65,24 +66,22 @@ async function deviceId(): Promise<string> {
 export async function logTryEvent(input: {
   playbookId: string;
   versionId?: string | null;
-  agentId?: string | null;
+  /** Agent slug, resolved here. Null is recorded as "no agent chosen". */
+  agentSlug?: string | null;
   action: "started" | "copied" | "opened";
-}): Promise<void> {
-  if (!input.playbookId) {
-    return;
-  }
-
+}): Promise<{ id: string | null }> {
   const supabase = await createClient();
 
-  const { error } = await supabase.from("try_events").insert({
-    playbook_id: input.playbookId,
-    version_id: input.versionId ?? null,
-    agent_id: input.agentId ?? null,
-    device_id: await deviceId(),
+  const { data: sessionData } = await supabase.auth.getUser();
+
+  return insertTryEvent(supabase, {
+    playbookId: input.playbookId,
+    versionId: input.versionId ?? null,
+    agentSlug: input.agentSlug,
+    // Set when someone is signed in, null otherwise. Read here rather than
+    // sent by the client, so a caller cannot claim a try belongs to a user.
+    userId: sessionData.user?.id ?? null,
+    deviceId: await deviceId(),
     action: input.action,
   });
-
-  if (error) {
-    return;
-  }
 }

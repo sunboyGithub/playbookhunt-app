@@ -6,7 +6,7 @@ begin;
 --
 -- auth.uid() reads the `request.jwt.claims` GUC, so impersonating a user means
 -- setting it — the same thing PostgREST does per request.
-select plan(22);
+select plan(25);
 
 -- ===========================================================================
 -- Fixtures (run as owner; RLS does not apply)
@@ -169,6 +169,20 @@ select is_empty(
   'try events are admin-only, so the anon who logged one cannot read it back'
 );
 
+-- The anonymous insert must not be able to name a user. Without this, a signed-
+-- out caller could put a try event on any account, which is what P8's "Tried"
+-- tab and P7's follow-up both read.
+select throws_ok(
+  $$
+  insert into public.try_events (playbook_id, version_id, user_id, device_id, action)
+  select id, current_version_id, '11111111-1111-1111-1111-111111111111', 'forged-anon', 'copied'
+  from public.playbooks where slug = 'test-playbook'
+  $$,
+  '42501',
+  null,
+  'anon cannot attribute a try event to a user'
+);
+
 select is(
   (select count(*)::int from public.playbook_requests),
   0,
@@ -227,6 +241,29 @@ select throws_ok(
   '42501',
   null,
   'a reporter cannot set is_verified or weight on insert'
+);
+
+-- A try event names the person who made it, so the same rule as reports: the
+-- insert policy compares user_id to auth.uid(), which comes from the verified
+-- JWT rather than the request body.
+select throws_ok(
+  $$
+  insert into public.try_events (playbook_id, version_id, user_id, device_id, action)
+  select id, current_version_id, '22222222-2222-2222-2222-222222222222', 'forged-user', 'copied'
+  from public.playbooks where slug = 'test-playbook'
+  $$,
+  '42501',
+  null,
+  'a user cannot attribute a try event to another user'
+);
+
+select lives_ok(
+  $$
+  insert into public.try_events (playbook_id, version_id, user_id, device_id, action)
+  select id, current_version_id, auth.uid(), 'own-user', 'copied'
+  from public.playbooks where slug = 'test-playbook'
+  $$,
+  'a user may log a try event against their own id'
 );
 
 select throws_ok(

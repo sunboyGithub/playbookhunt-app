@@ -1033,3 +1033,142 @@ is its own change and is not smuggled into this milestone.
 - **`db:seed-stats` creates 40 auth accounts.** Local only, and `pnpm db:reset`
   removes them, but the account creation is slower than the rest of the script and
   is the first thing to time out on a cold Docker stack.
+
+---
+
+## P7 — Try flow and agent picker
+
+### What was built
+
+The try flow, in three places: a Radix `Sheet` on desktop and full-screen on a
+phone, opened from the playbook detail page's try button; a standalone page at
+`/p/[slug]/try`; and a card hover "Try" link that goes to that standalone page.
+All three render one component, `TryPanel`, so there is a single definition of
+what the reader sees.
+
+**Step 1, agent.** `AgentPicker` renders each selectable agent as a large card —
+Muse in Muse blue with the official avatar inside a Meta-blue ring, "Recommended"
+on the first, and an evidence line. Coming-soon agents are real `<button disabled>`
+chips with no label and no explanation. Which agents are in which group is decided
+by `listAgents()`, which filters on `status` and never on the display name — so
+renaming a vendor cannot make it selectable.
+
+**Step 2, details.** `TryFieldInput` renders all eight `playbook_inputs` types:
+`provider_picker` and `select` as chips, `money` with a `$` affordance and a
+decimal keypad, `zip` as `type="text"` with `inputMode="numeric"` so leading
+zeros survive, `date`, `textarea`, and everything else as a plain input.
+`toTryFields()` narrows the stored `jsonb` `options` and the `text` `type` rather
+than casting them.
+
+**Step 3, prompt.** `renderTemplate()` substitutes `{{key}}` in a single pass, so
+a bill pasted in as `{{price}}` is never re-substituted, and leaves unfilled slots
+as `[Label]`. Copy works with nothing filled — the missing required fields are
+named, not enforced, because AGENTS.md forbids gating the copy on anything.
+
+**Agent memory.** `src/lib/try/agent-memory.ts` reads and writes `localStorage`
+through `useSyncExternalStore`. That is not a style preference: the effect-based
+version this replaced set state synchronously on mount, which the React Compiler
+rejects, *and* it logged the `started` event against the default agent before the
+remembered one arrived — so a returning reader's first try was attributed to an
+agent they did not pick.
+
+**Logging.** `started` / `copied` / `opened` on `try_events`, with a server-issued
+`ph_device` cookie for anonymous readers, and a `followups` row for signed-in ones
+(`due_at` computed from the server clock, never from a client value).
+
+### Checks and results
+
+| Check | Result |
+| --- | --- |
+| `pnpm lint` | **Pass** — no findings, no warnings |
+| `pnpm typecheck` | **Pass** — no errors |
+| `pnpm test` | **Pass** — 234/234 across 15 files (was 181) |
+| `pnpm test:db` | **Pass** — 51 tests across 3 files (was 48) |
+| `pnpm build` | **Pass** — 22 routes, Proxy registered |
+| `npx playwright test` | **Pass** — 104 passed, 8 skipped, 0 failed (was 90/8) |
+
+### Two real bugs this milestone found
+
+**1. `logTryEvent` always returned `{ id: null }`.** The insert was written as
+`.insert(...).select("id").single()`. `try_events` grants SELECT to admins only,
+by design, so asking PostgREST to return the inserted row re-reads it under that
+policy — and the whole insert fails with a 42501 whose message reads like "you may
+not log a try". The row was never the problem: a plain `POST` returns 201. Because
+the action swallowed the error, the try flow looked perfect, the rows landed, and
+only the *returned id* was always null — so every follow-up was created with no
+`try_event_id` linking it to the try that caused it. Fixed by minting the id
+client-side, which needs no read at all (`20240101000008`, because supplying `id`
+needs an INSERT grant on that column).
+
+**2. Anyone could attribute a try to any account.** The insert policy was
+`WITH CHECK (true)`, correct for the parts of the row nobody should control but
+wrong for `user_id`, which the same policy then let any caller set. I confirmed it
+against the running stack: a signed-in attacker inserting a row with a stranger's
+`user_id` returned 201, and so did an entirely anonymous caller. That is not
+cosmetic — P8's "Tried" tab reads `try_events` by `user_id`, so a forged row puts
+strangers' activity in someone else's list and mails them a follow-up for it.
+`20240101000009` restricts the check to `auth.uid()`, from the verified JWT rather
+than the request body.
+
+The second one is the reason the acceptance criteria asked for an integration
+test against local Supabase rather than unit tests: this is an RLS fact, and RLS
+is only real against a running Postgres. Asserting it against a mock would have
+asserted that the mock is correct.
+
+### What to inspect in the browser
+
+1. **`/p/lower-your-internet-bill`, then "Try this playbook"** — the sheet slides
+   in from the right on desktop and covers the screen on a phone.
+2. **Step 1** — Muse is preselected and badged "Recommended", with its avatar in a
+   blue ring. ChatGPT, Grok and Manus are grey chips below; they must be genuinely
+   unfocusable, not just styled that way. Instinct must be absent entirely.
+3. **Step 2** — pick a provider chip, type into Monthly price and ZIP. The line
+   under the prompt must read `Only Provider is required · stays in your browser`,
+   and each optional field must show `optional · <why it helps>`.
+4. **Step 3** — the prompt updates as you type. Leave a field blank and its slot
+   reads `[ZIP code]`. The internet-bill playbook has six inputs; fill all six and
+   no `[…]` should remain.
+5. **Copy prompt** — the label becomes `✓ Copied`, and pasting gives the *filled*
+   prompt, whitespace included.
+6. **Copy with nothing filled** — it must still copy, and must say
+   `Still needed: Provider`. This is the AGENTS.md rule that the copy is never
+   gated; check it explicitly, because it is the easiest thing to break later.
+7. **The reminder card** — signed out, after the first copy only. "Not now" must
+   survive a reload.
+8. **"Open in Muse"** — Muse has **no** `launch_url_template` in the database, so
+   the button must read `Copy & open Muse` and copy first. If it ever reads "Open
+   in Muse", someone has invented a URL scheme we never verified.
+9. **390×844** — the whole flow, filled and copied, at the iPhone 13 viewport.
+
+### Deliberate deviations, stated
+
+- **Card hover "Try" links to `/p/[slug]/try` rather than opening the sheet.** A
+  listing page cannot inline every card's prompt template and inputs to fill a
+  dialog nobody opened. The standalone page is the same panel.
+- **Coming-soon chips carry no text beyond the name.** No "Coming soon", no
+  "Script only", no tooltip. A reader told an agent is nearly here has been told
+  something we cannot yet promise.
+- **`/p/[slug]/report` is a placeholder page.** The try flow ends by asking whether
+  it worked, so the link must not 404; P8 replaces it with the real form.
+
+### Blocks and unverified criteria
+
+- **The integration test skips silently without a database.** It sets up at module
+  scope and `describe.skipIf`s when local Supabase is unreachable, so `pnpm test`
+  stays runnable without Docker — but that also means a green `pnpm test` on a
+  machine with no database has verified *none* of the RLS rules above. I ran it
+  against the running stack and all 7 pass.
+- **The privacy test proves the two actions this panel calls take no field
+  values.** It cannot prove a future third action would not. The structural
+  guarantee is weaker than it looks: nothing stops someone adding a param.
+- **`revalidate = 300` is still inert** (carried over from P6), so the build still
+  reports every route as `ƒ (Dynamic)`.
+- **`/api/revalidate` is still unauthenticated.** Deferred to P9.
+- **`pnpm test:e2e:prod` has still not been run as a named script.** The suite was
+  run against a production build served on port 3111 because a stale `next dev`
+  from an earlier session held port 3000 and I did not have permission to kill a
+  process I did not start. The build itself passes; what is unverified is the
+  navigation-regression spec's timings under a clean `E2E_TARGET=prod` run.
+- **Muse prefill is entirely unexercised.** With `launch_url_template` NULL there
+  is no code path in production that reaches `mode: "prefill"`. It is unit-tested
+  but has never run against a real agent URL, because none is verified.

@@ -1,10 +1,8 @@
-import Link from "next/link";
 import { BadgeCheck } from "lucide-react";
 
 import { AgentMark } from "@/components/agents/agent-mark";
 import { SourcesList } from "@/components/playbook/detail/sources-list";
 import { WorksWith } from "@/components/playbook/detail/works-with";
-import { Button } from "@/components/ui/button";
 import { formatVerified } from "@/lib/stats/format";
 import type { DetailStats } from "@/lib/stats/detail";
 import type { Agent } from "@/server/queries/types";
@@ -36,8 +34,8 @@ export function DetailSidebar({
   changelog,
   lastVerifiedAt,
   now,
-  tryHref,
   triedCount,
+  tryButton,
 }: {
   activeAgent: Agent | null;
   comingSoon: Agent[];
@@ -50,8 +48,9 @@ export function DetailSidebar({
   changelog: string | null;
   lastVerifiedAt: string | null;
   now: number;
-  tryHref: string;
   triedCount: number;
+  /** The trigger that opens the try sheet, styled to fill this column. */
+  tryButton: React.ReactNode;
 }) {
   const verified = formatVerified(lastVerifiedAt, now);
 
@@ -67,11 +66,7 @@ export function DetailSidebar({
         </p>
       ) : null}
 
-      <Button asChild className="h-11 w-full rounded-full text-base">
-        <Link href={tryHref} data-testid="try-button">
-          Try this playbook
-        </Link>
-      </Button>
+      {tryButton}
 
       <div className="mt-5 space-y-5">
         <WorksWith activeAgent={activeAgent} comingSoon={comingSoon} stats={stats} />

@@ -2,22 +2,30 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
-import { InputsList } from "@/components/playbook/detail/inputs-list";
-import { PromptBlock } from "@/components/playbook/detail/prompt-block";
+import { TryPanel } from "@/components/try/try-panel";
+import { toTryFields } from "@/lib/try/fields";
+import { formatEvidenceHeadline } from "@/lib/stats/format";
+import { createClient } from "@/lib/supabase/server";
 import { getPublishedPlaybookBySlug } from "@/server/queries/playbooks";
+import { listAgents } from "@/server/queries/taxonomy";
 
 /**
  * The standalone try page.
  *
- * Deliberately minimal, and I want to be clear that this is incomplete rather
- * than shipped: P7 replaces it with the try sheet — an agent picker, the inputs
- * filled into the prompt, and the launch handoff. Until then this page does the
- * one thing it can do honestly, which is show the prompt next to what the
- * reader needs to gather.
+ * The same `TryPanel` the sheet renders, in a full-height column instead of a
+ * side panel. Two entry points, one component: the sheet on the detail page, and
+ * this page, which is what a card's hover Try and any shared link go to. A
+ * listing page cannot inline every card's inputs and prompt to fill a dialog
+ * nobody has opened, so the page is how the flow is reached from a list.
  *
- * It exists at all because the sidebar's "Try this playbook" points here, and a
- * button that 404s is worse than one that does less.
+ * The privacy note is shown here and not in the sheet. In a sheet it sits under
+ * a form the reader has just opened mid-page, which reads as a wall of text; at
+ * the top of a full page it is the natural place for it, before anything is typed.
  */
+export const metadata = {
+  title: "Try this playbook",
+};
+
 export default async function TryPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const playbook = await getPublishedPlaybookBySlug(slug);
@@ -28,8 +36,11 @@ export default async function TryPage({ params }: { params: Promise<{ slug: stri
 
   const content = playbook.current_version;
 
+  const [agents, supabase] = await Promise.all([listAgents(), createClient()]);
+  const { data: sessionData } = await supabase.auth.getUser();
+
   return (
-    <div className="mx-auto w-full max-w-3xl px-4 py-8">
+    <div className="mx-auto flex h-[calc(100dvh-4rem)] w-full max-w-3xl flex-col px-4 py-6">
       <Link
         href={`/p/${playbook.slug}`}
         className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
@@ -39,20 +50,22 @@ export default async function TryPage({ params }: { params: Promise<{ slug: stri
       </Link>
 
       <h1 className="mt-4 text-2xl font-semibold tracking-tight">Try this playbook</h1>
-      <p className="mt-1 text-muted-foreground">{playbook.promise}</p>
 
-      <div className="mt-6 space-y-8">
-        {content ? <InputsList inputs={content.inputs} /> : null}
-
-        {content ? (
-          <PromptBlock
-            prompt={content.prompt_template}
-            playbookId={playbook.id}
-            versionId={content.id}
-            tryHref={`/p/${playbook.slug}/try`}
-            stepCount={content.steps.length}
-          />
-        ) : null}
+      <div className="mt-4 min-h-0 flex-1">
+        <TryPanel
+          playbookId={playbook.id}
+          playbookSlug={playbook.slug}
+          versionId={content?.id ?? null}
+          promise={playbook.promise}
+          inputs={toTryFields(content?.inputs ?? [])}
+          promptTemplate={content?.prompt_template ?? ""}
+          steps={content?.steps ?? []}
+          selectableAgents={agents.selectable}
+          comingSoonAgents={agents.coming_soon}
+          recommendedEvidence={formatEvidenceHeadline(playbook.stats)}
+          signedIn={Boolean(sessionData.user)}
+          showPrivacyNote
+        />
       </div>
     </div>
   );

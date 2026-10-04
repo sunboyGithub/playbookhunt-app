@@ -134,28 +134,33 @@ test.describe("playbook detail", () => {
       // The mobile bar surfaces the CTA under the header because on a phone the
       // sidebar — which holds the other one — sits below the entire main column,
       // a long way from the title. So on a phone the duplicate is deliberate
-      // rather than a leak, and the assertion is about where they point rather
-      // than about how many there are.
+      // rather than a leak, and the assertion is about what they do rather than
+      // about how many there are.
       //
       // An earlier version used `.or()`, which unions two elements and then
       // fails a strict-mode check that both exist; a later one asserted exactly
       // one visible button, which is true on desktop and false on mobile. The
       // page was right both times.
+      //
+      // And a third asserted every button's `href` was `/p/[slug]/try`. P7 made
+      // these `<TryDialog>` triggers — a `<span>` inside a `<button>`, not an
+      // anchor — so there is no href to read and the try flow opens in place.
+      // What replaced it is stronger: the sheet really opens, for this
+      // playbook.
       const tryButtons = page.locator(
         '[data-testid="try-button-mobile"]:visible, [data-testid="try-button"]:visible',
       );
       await expect(tryButtons.first()).toBeVisible();
 
-      // Every visible try button goes to this playbook's try page — never a
-      // dead link, and never somewhere else.
-      const hrefs = await tryButtons.evaluateAll((nodes) =>
-        nodes.map((node) => node.getAttribute("href")),
-      );
-      expect(new Set(hrefs)).toEqual(new Set([`/p/${slug}/try`]));
-
-      // The try route exists from P6 precisely so this button does not 404.
       await tryButtons.first().click();
-      await expect(page).toHaveURL(new RegExp(`/p/${slug}/try`));
+      await expect(page.getByTestId("try-panel")).toBeVisible();
+
+      // It is this playbook's flow, not another's — the sheet carries the title
+      // through to the report link, which is the cheapest unambiguous witness.
+      await expect(page.getByTestId("try-report-link")).toHaveAttribute(
+        "href",
+        `/p/${slug}/report`,
+      );
     });
   }
 

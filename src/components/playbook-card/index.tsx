@@ -184,15 +184,18 @@ function PlaybookCardImpl({
                 there — which is the frame's requirement, and the reason this is
                 a media query rather than a `hover:` utility.
 
-                Points at the playbook, not /try, until P7 builds the try flow:
-                a Try button that 404s is worse than one that lands somewhere
-                useful. */}
+                Goes to the standalone try page rather than opening the sheet.
+                A sheet needs this playbook's inputs, prompt and steps, and a
+                listing page shows a dozen cards — inlining all of that to fill a
+                dialog nobody has opened yet would be a large cost paid on every
+                listing view. The sheet is for the detail page, where the reader
+                has already committed to this one playbook. */}
             <Button
               asChild
               size="sm"
               className="rounded-full bg-brand text-white hover:bg-brand/90 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:focus-visible:opacity-100 group-hover:opacity-100"
             >
-              <Link href={href}>
+              <Link href={`${href}/try`}>
                 <Play aria-hidden className="size-3" />
                 Try
               </Link>

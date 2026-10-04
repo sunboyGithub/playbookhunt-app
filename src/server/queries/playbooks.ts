@@ -117,16 +117,18 @@ export async function getVersionContent(versionId: string | null): Promise<Versi
 
   const supabase = await createClient();
 
+  // The FK names are spelled out because PostgREST cannot always infer an embed,
+  // and when it cannot it returns null for the whole row rather than raising —
+  // which silently costs the reader their prompt. Nothing resembling a SQL
+  // comment is allowed inside the select string for the same reason.
   const { data, error } = await supabase
     .from("playbook_versions")
     .select(
-      `
-        id, playbook_id, version, prompt_template, changelog, created_at,
-        inputs:playbook_inputs (
-          id, key, label, help, why_it_helps, type, options, required, sort
-        ),
-        steps:playbook_steps ( id, sort, body )
-      `,
+      `id, playbook_id, version, prompt_template, changelog, created_at,
+       inputs:playbook_inputs!playbook_inputs_version_id_fkey (
+         id, key, label, help, why_it_helps, type, options, required, sort
+       ),
+       steps:playbook_steps!playbook_steps_version_id_fkey ( id, sort, body )`,
     )
     .eq("id", versionId)
     .maybeSingle();

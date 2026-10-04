@@ -3,3 +3,5 @@ allowBuilds:
   sharp: true
   # Native resolver binary used by eslint-config-next.
   unrs-resolver: true
+  # esbuild binary, required by tsx to run the content import scripts.
+  esbuild: true

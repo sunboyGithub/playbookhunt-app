@@ -375,3 +375,130 @@ those extensions, not changing the app.
 - **Types were generated from the local database**, so they reflect local config.
   Regenerate against the hosted project before the first deploy if the hosted
   project's extensions differ.
+
+---
+
+## P3 — Content pipeline: schema, importer, first playbooks
+
+**Status:** complete. Three example playbooks imported, idempotency and the
+version-bump criterion both verified.
+
+### What was built
+
+**Authoring format.** `content/playbooks/<slug>.yaml`, one file per playbook,
+with `content/templates/playbook_template.yaml` as the copy-me starting point
+and `content/use_cases_and_kits.yaml` for use cases and starter kits. A
+playbook's identity *is* its filename: `validate-content.ts` fails the build if
+the two disagree, which stops `lower-your-internet-bill.yaml` from importing as
+`lower-your-internet-bill-2`.
+
+**`src/lib/content/schema.ts`** — zod schemas for both file types. Two rules
+here are product constraints rather than type hygiene, enforced where the
+content is written rather than trusted at runtime:
+
+- At most **two required inputs**. AGENTS.md caps the ask on the reader, and a
+  DB trigger enforces the same rule independently, so neither layer can be
+  edited past it alone.
+- Every `{{placeholder}}` in the prompt must name a declared input, and every
+  required input must appear. An undeclared `{{provider}}` would be sent to the
+  agent as literal text; an unused *required* field makes the reader do work
+  that changes nothing. An unused *optional* field is a deliberate choice and is
+  left alone — it still shows on the "what you'll need" list.
+
+**`scripts/import-content.ts`** — the importer. Upserts categories (owned by
+the seed migration, so it warns on drift instead of writing), use cases,
+playbooks, versions, inputs, steps, agent links, sources, and memberships. It
+reports every intended write as `create`/`update`/`version`/`unchanged`/`skip`,
+honours `--dry-run`, and prints a summary line.
+
+**`scripts/validate-content.ts`** — the same validation with no database, for CI.
+It adds two checks only possible offline: every category referenced is one of the
+eight in AGENTS.md, and every playbook the catalog names either has a file or is
+at least a well-formed slug. The last case is a *note*, not a failure — the
+catalog is allowed to reference playbooks not yet written.
+
+**Three example playbooks** — `lower-your-internet-bill`,
+`cheaper-car-insurance`, `plan-7-days-in-japan` — chosen to span outcomes
+(monthly money, yearly money, non-money binary) so the ranking and reporting
+thresholds are exercised by real data rather than by fixtures alone.
+
+### Bugs found and fixed
+
+1. **The version check was a silent no-op.** The embed
+   `inputs:playbook_inputs (...)` could not be resolved by PostgREST, so the
+   query returned `null` with its `error` discarded. The diff then compared
+   nothing, took the "unchanged" branch, and **editing a prompt would never
+   have created version 2** — the single acceptance criterion P3 exists to
+   satisfy. Fixed with explicit FK hints (`!playbook_inputs_version_id_fkey`)
+   and a `throw` on `error`, so a future schema-cache failure cannot again
+   masquerade as "nothing changed". `src/server/queries/playbooks.ts` had the
+   same embed and the same latent bug; fixed there too.
+2. **Import order dropped every use-case membership.** Playbooks were imported
+   before the use cases they reference existed, so each membership was skipped
+   with a warning and the importer still exited 0. Reordered into three phases —
+   catalog metadata, then playbooks, then kit membership — with a comment
+   recording why the order is load-bearing.
+3. **`linkMembers` misreported its own work.** The caller counted rows before
+   and after to infer what had been inserted, so a run that had just linked two
+   playbooks reported "already linked". It now returns the count it inserted.
+4. **A dry run would have written to the database.** The guard read
+   `if (dryRun || drifted)`; it must be `if (!dryRun && drifted)`.
+5. **Three type errors in the membership writer**, all from trying to be too
+   clever: computing the parent key as `[foreignKey]` widened the row to an
+   index signature matching neither insert shape, and passing a union of tables
+   to `.from()` with a union of row arrays defeated overload resolution. Each
+   branch is now written out in full with `rows` declared inside it.
+6. **A dead `let currentVersion = …eq("id", "null")` placeholder** and an unused
+   `file` parameter, both left from an earlier draft.
+
+### Checks and results
+
+| Check | Result |
+|---|---|
+| `pnpm content:validate` | **Pass** — 3 playbooks and the catalog valid |
+| `pnpm content:import` on an empty DB | **Pass** — 12 changes written |
+| `pnpm content:import` again | **Pass** — `0 change(s) written, 12 unchanged` |
+| `supabase db reset` | **Pass** — migrations apply cleanly from scratch |
+| Edit a prompt → re-import | **Pass** — `v2 — content changed (was v1)` |
+| v1 retained after the bump | **Pass** — v1 present, `current_version_id` moved to v2 |
+| `pnpm test` | **Pass** — 37/37, 18 of them new content-schema tests |
+| `pnpm test:db` | **Pass** — 36/36 |
+| `pnpm typecheck` | **Pass** |
+| `pnpm lint` | **Pass** |
+| `pnpm test:e2e` | **Pass** — 6/6 |
+
+The two template-drift tests assert that every key in
+`playbook_template.yaml` is declared by the schema *and* vice versa. The
+schema's own doc comment claimed such a test existed; it did not, and now it
+does.
+
+### What to inspect in the browser
+
+- **<http://localhost:3000/p/lower-your-internet-bill>** — currently a
+  placeholder that says so. It becomes the real detail page in P6.
+- **<http://localhost:54323> → Table Editor** — `playbooks` (3 rows, all
+  `published`), `playbook_versions` (3 rows, all v1 after a reset),
+  `playbook_inputs`, `playbook_steps`, `use_cases`, `collections`. Open a
+  playbook's prompt and read it against the YAML file: they should match.
+- **Re-run `pnpm content:import`** — every line should say `unchanged` or
+  "already linked". If anything says `create`, the importer is not idempotent.
+
+### Blocks and unverified criteria
+
+- **Nothing is pushed to GitHub.** `gh` is installed but not authenticated, so
+  no remote can be created. This needs the project owner's `gh auth login`.
+- **`getVersionContent` is fixed but not yet exercised by a route.** The
+  playbook detail page is still a P6 placeholder, so the page-level query path
+  has no coverage. The identical embed in the importer is verified working, so
+  the fix is real — but "the detail page renders its prompt" is untested until
+  P6, and should be checked there rather than assumed.
+- **Only three playbooks exist.** The catalog references more; those are
+  reported as skipped, by design.
+- **The importer has no automated test.** Its behaviour was verified by running
+  it — idempotency, version bump, membership counts, clean-DB import — but
+  there is no fixture-based suite, so a future refactor could regress it
+  without a red test.
+- **`supabase db reset` prints `no files matched pattern: supabase/seed.sql`.**
+  Harmless: content is imported by the script, not by a SQL seed. Worth
+  removing the reference or pointing it at the importer so the warning stops
+  implying something is missing.

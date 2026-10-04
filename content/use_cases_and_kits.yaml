@@ -42,10 +42,10 @@ categories:
     name: Personal finance
     icon: $
   - slug: travel-booking
-    name: Travel – booking
+    name: Travel booking
     icon: ✈
   - slug: travel-planning
-    name: Travel – planning
+    name: Travel planning
     icon: map
   - slug: shopping
     name: Shopping

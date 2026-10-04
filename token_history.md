@@ -129,6 +129,34 @@ that made "anon cannot do X" a runnable assertion instead of a claim. Every one
 of those five was caught by a test rather than by inspection.
 
 
+### P3 — Content pipeline: schema, importer, first playbooks
+
+**Tokens:** unavailable. No measurement source; see the note at the top.
+
+Like P2, this milestone was mostly iteration against a running system rather
+than file writing, and again the most valuable thing was a check that could
+fail. The decisive one was probing the PostgREST embed directly:
+
+```
+error: Could not find a relationship between 'playbook_versions' and 'inputs'
+data? false version: undefined
+```
+
+That single probe turned "the importer says unchanged" from a claim into a
+diagnosed failure. The importer had been reporting `unchanged` because its
+version query returned null — not because content matched. Had that not been
+probed, P3 would have been committed green with its central criterion unmet:
+editing a prompt would never have created version 2, and no test existed to say
+otherwise.
+
+Two things are worth carrying forward as method:
+
+- **Probing the layer beneath the symptom.** Two candidate embed syntaxes, two
+  queries, thirty seconds — cheaper than any amount of re-reading the importer.
+- **Asserting the thing that is easy to lose.** The version check's `error` was
+  discarded, so a hard failure presented as a clean success. Adding a `throw`
+  costs one line and closes the whole class.
+
 ---
 
 ## Maintaining this file

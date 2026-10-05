@@ -144,20 +144,56 @@ export async function copiedActionsFor(
 }
 
 /**
+ * Addresses already resolved in this worker process.
+ *
+ * An address's `auth.users` id never changes, so once this process has seen the
+ * list it never has to fetch it again for an address it already knows. That
+ * matters more than it looks: `copiedActionsFor` is called from inside `toPass`
+ * retry loops, so before this cache every retry of "wait for the copy to be
+ * logged" transferred the whole user table. Under five workers on one Postgres
+ * that was the single largest source of load in the suite, and it showed up as
+ * those loops timing out rather than as anything resembling a product bug.
+ *
+ * A miss always re-fetches, so an account created after the first call is still
+ * found — nothing is cached negatively.
+ */
+const resolvedAddresses = new Map<string, string>();
+
+/**
  * The `auth.users` id for an address, or null.
  *
  * There is no lookup by address in the admin API, so this pages the list. The
  * page size is the maximum the endpoint accepts, which keeps a suite that has
  * created a few hundred test accounts down to a single round trip.
+ *
+ * **This is page 1 only, and that is a real limit.** Once the local database
+ * passes 1000 accounts the addresses a test just created fall off the end of the
+ * first page and this quietly starts returning `null` — which
+ * `copiedActionsFor` turns into an empty array, so a test fails as "nothing was
+ * logged" when the copy *was* logged. The local stack was at 229 accounts. The
+ * fix is to look users up by id (the sign-in helpers already have the id) or to
+ * prune the table between runs; both are test-infrastructure work that belongs
+ * with this function rather than smuggled into a feature milestone.
  */
 export async function authUserId(email: string): Promise<string | null> {
+  const cached = resolvedAddresses.get(email);
+  if (cached !== undefined) {
+    return cached;
+  }
+
   const supabase = adminClient();
   if (!supabase) {
     return null;
   }
 
   const { data } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
-  return data.users.find((user) => user.email === email)?.id ?? null;
+  const id = data.users.find((user) => user.email === email)?.id ?? null;
+
+  if (id !== null) {
+    resolvedAddresses.set(email, id);
+  }
+
+  return id;
 }
 /* -------------------------------------------------------------------------- */
 /* The one write                                                              */

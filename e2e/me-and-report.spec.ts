@@ -172,7 +172,14 @@ test.describe("my account", () => {
     // The toast is the action's return. The switch moved before the write, and
     // a reload issued in that gap cancels the request outright — so the switch
     // would come back on, which is exactly what the next assertion is for.
-    await expect(page.locator("[data-sonner-toast]").first()).toContainText("Reminders off");
+    //
+    // Matched by text, not by position. Sonner stacks toasts rather than
+    // replacing them, so the delete's "Report deleted." is still mounted here,
+    // and `.first()` was resolving to *that* one — a test asserting on the
+    // previous toast's text is not a test of anything.
+    await expect(
+      page.locator("[data-sonner-toast]", { hasText: "Reminders off" }),
+    ).toBeVisible();
 
     // Across a reload, because the switch is optimistic and an optimistic switch
     // that quietly reverts is the failure this check exists to catch.

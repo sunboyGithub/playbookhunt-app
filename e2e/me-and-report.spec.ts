@@ -157,6 +157,12 @@ test.describe("my account", () => {
     /* ------------------------------------------------------------ opt out */
 
     await page.getByTestId("me-tab-settings").click();
+    // Wait for the navigation the way every other tab switch in this file does.
+    // The delete above leaves a `router.refresh()` streaming, and a click landing
+    // during it can be dropped — which showed up as `me-settings` never appearing
+    // while the URL was still `tab=reported`. Asserting the URL makes that a
+    // legible failure instead of a mysterious missing panel.
+    await page.waitForURL(/tab=settings/);
     await expect(page.getByTestId("me-settings")).toBeVisible();
 
     const reminders = page.getByTestId("me-reminders-switch");

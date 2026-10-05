@@ -43,6 +43,22 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
+  /**
+   * Playwright's default is 5s, which this suite cannot meet.
+   *
+   * Every assertion here is waiting on something the *local* stack has to do
+   * first — a GoTrue `getUser()`, an RPC, a revalidation, a row becoming visible
+   * to a reader's RLS — and the run puts five workers on one Postgres in Docker.
+   * Three different tests failed on three different 5s timeouts in a single run,
+   * each in a place that passes when the same file is run serially. So the
+   * failures were the timeout, not the behaviour.
+   *
+   * Raising it does not weaken the assertions that are deliberately about a
+   * race — those expect a value to *stay* wrong, so they fail fast whichever way
+   * the timeout goes. It makes them stricter: an assertion that gave up early
+   * and saw the pre-write state could previously pass for the wrong reason.
+   */
+  expect: { timeout: 15_000 },
   reporter: "html",
   // Once per run, before the first worker. Anything that has to happen exactly
   // once belongs here and not in `beforeAll`, which runs per worker — see the

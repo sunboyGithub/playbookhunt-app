@@ -66,7 +66,7 @@ export default async function AdminPlaybooksPage({
         <Panel>
           {items.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
-              Nothing with that status. Submissions land here too — see the queue.
+              Nothing with that status.
             </p>
           ) : (
             <table className="w-full text-sm">

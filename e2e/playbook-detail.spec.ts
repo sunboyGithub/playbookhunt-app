@@ -202,10 +202,16 @@ test.describe("playbook detail", () => {
     // The action is fired without being awaited, so the row can land a tick
     // after the label change. `since` is backdated by a few seconds to absorb
     // clock skew between this machine and the Postgres container.
+    //
+    // The window matches the suite's `expect.timeout`. This one was 5s and it was
+    // not enough — the write is a server action into a Postgres that five workers
+    // are sharing, so the row sometimes lands after the window closes. The
+    // assertion is "the row eventually exists", and a longer window makes that
+    // true without weakening it.
     await expect(async () => {
       const actions = await copiedActionsSince(SLUGS[0], since);
       expect(actions.length).toBeGreaterThan(0);
-    }).toPass({ timeout: 5_000 });
+    }).toPass({ timeout: 15_000 });
   });
 
   test("the bar and its percentages appear once the threshold is met", async ({ page }) => {

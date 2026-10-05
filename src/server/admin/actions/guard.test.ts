@@ -72,6 +72,7 @@ const { saveCollection, saveUseCase, reorderCollectionItems, reorderUseCaseItems
   await import("@/server/admin/actions/arranged");
 const { setRequestStatus } = await import("@/server/admin/actions/requests");
 const { setFeedbackStatus } = await import("@/server/admin/actions/feedback");
+const { reviewSubmission } = await import("@/server/admin/actions/submissions");
 
 /** Every action, and a call that is otherwise valid. */
 const CASES: [name: string, call: () => Promise<{ ok: boolean; error?: string }>][] = [
@@ -150,6 +151,15 @@ const CASES: [name: string, call: () => Promise<{ ok: boolean; error?: string }>
   ],
   ["setRequestStatus", () => setRequestStatus({ requestIds: ["r"], status: "planned" })],
   ["setFeedbackStatus", () => setFeedbackStatus({ feedbackId: "f", status: "reviewed" })],
+  [
+    "reviewSubmission",
+    () =>
+      reviewSubmission({
+        playbookId: "11111111-1111-4111-8111-111111111111",
+        decision: "approve",
+        note: null,
+      }),
+  ],
 ];
 
 describe("every admin action refuses a non-administrator", () => {

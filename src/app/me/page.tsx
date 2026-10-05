@@ -4,9 +4,14 @@ import { redirect } from "next/navigation";
 
 import { MeList } from "@/components/me/me-list";
 import { SettingsPanel } from "@/components/me/settings-panel";
+import { SubmissionList } from "@/components/create/submission-list";
 import { getViewer } from "@/lib/auth/viewer";
 import { getReminderPreference, listMePlaybooks } from "@/server/queries/me";
 import { nowMs } from "@/server/clock";
+// A server action, called from a server component as an ordinary async function.
+// It reads through the creator's own RLS-scoped client, so there is no author id
+// to pass and nothing to get wrong.
+import { listMyDrafts } from "@/app/actions/create-playbook";
 
 /**
  * "My playbooks" — Frame 9.
@@ -37,6 +42,7 @@ const TABS = [
   { key: "saved", label: "Saved" },
   { key: "tried", label: "Tried" },
   { key: "reported", label: "Reported" },
+  { key: "submissions", label: "Submissions" },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -60,7 +66,10 @@ export default async function MePage({
 
   const tabParam = first(raw.tab);
   const settings = tabParam === "settings";
-  const tab: TabKey = tabParam === "tried" || tabParam === "reported" ? tabParam : "saved";
+  const tab: TabKey =
+    tabParam === "tried" || tabParam === "reported" || tabParam === "submissions"
+      ? tabParam
+      : "saved";
 
   const categoryParam = first(raw.category) ?? "";
   const sort = first(raw.sort) === "evidence" ? "evidence" : "recent";
@@ -87,7 +96,12 @@ export default async function MePage({
     return query ? `/me?${query}` : "/me";
   };
 
-  const source = lists[tab];
+  // Submissions are a different shape from the other three lists — they are the
+  // creator's own drafts rather than published playbooks — so they get their own
+  // component and their own query rather than being bent into `MeList`.
+  const submissions = tab === "submissions" ? (await listMyDrafts()).drafts : [];
+
+  const source = tab === "submissions" ? [] : lists[tab];
   const filtered = categoryParam
     ? source.filter((item) => item.category.slug === categoryParam)
     : source;
@@ -103,7 +117,9 @@ export default async function MePage({
    * different orders on the same data.
    */
   const items =
-    sort === "evidence"
+    tab === "submissions"
+      ? []
+      : sort === "evidence"
       ? [...filtered].sort(
           (a, b) =>
             toNumber(b.stats?.report_count)! - toNumber(a.stats?.report_count)! ||
@@ -120,6 +136,7 @@ export default async function MePage({
     saved: lists.saved.length,
     tried: lists.tried.length,
     reported: lists.reported.length,
+    submissions: submissions.length,
   };
 
   return (
@@ -175,8 +192,10 @@ export default async function MePage({
       ) : (
         <>
           {/* Chips appear only once there is something to filter to. A lone
-              "All" chip is a control that cannot do anything. */}
-          {lists.categories.length > 0 ? (
+              "All" chip is a control that cannot do anything. They are also hidden
+              on Submissions, whose rows are not category-filtered and would
+              ignore the filter without saying so. */}
+          {tab !== "submissions" && lists.categories.length > 0 ? (
             <div className="mt-5 flex flex-wrap items-center gap-2">
               <Chip href={href({ category: null })} active={categoryParam === ""}>
                 All
@@ -215,7 +234,11 @@ export default async function MePage({
             </div>
           ) : null}
 
-          <MeList items={items} now={now} tab={tab} />
+          {tab === "submissions" ? (
+            <SubmissionList drafts={submissions} />
+          ) : (
+            <MeList items={items} now={now} tab={tab} />
+          )}
         </>
       )}
     </main>

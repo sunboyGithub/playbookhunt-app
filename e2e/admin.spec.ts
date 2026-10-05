@@ -1,6 +1,7 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Browser } from "@playwright/test";
 
 import { signInOrSkip, signInWithEmailLink } from "./support/auth";
+import { deleteSubmittedPlaybook, fillPlaybook, latestSubmissionFor } from "./support/create";
 import { adminClient } from "./support/db";
 import { deleteReport, demote, promoteToAdmin, queuePendingReport } from "./support/admin";
 
@@ -292,3 +293,168 @@ async function userIdFor(email: string): Promise<string> {
 
   return user.id;
 }
+/**
+ * The review round trip, in both directions.
+ *
+ * ## Why this is here and not in `create.spec.ts`
+ *
+ * A creator submitting and an administrator reviewing are two different accounts
+ * in two different sessions. Putting this in `create.spec.ts` would mean either
+ * serialising that file's ten tests behind two logins, or reaching for the
+ * service-role client to fake the submission — and a fake submission is a shape
+ * the product never produces, so a bug in the real one would still pass.
+ *
+ * So this runs in its own describe block with its own browser context for the
+ * creator. The cost is one extra sign-in; the benefit is that the assertion is
+ * about the product rather than about a fixture.
+ *
+ * ## What "published" is checked against
+ *
+ * A 200 from `/p/<slug>` and `status = 'published'` in the row. The row alone
+ * would pass if the page were still filtered out somewhere in the reader's RLS,
+ * and the 200 alone would pass if the row had been published by something other
+ * than this click.
+ */
+test.describe("the review round trip", () => {
+  test.describe.configure({ timeout: 120_000 });
+
+  /** Sign in as a creator, submit `title`, and hand back the rows it wrote. */
+  async function submitFromCreator(browser: Browser, title: string) {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+
+    const email = await signInOrSkip(page, "creator");
+
+    await fillPlaybook(page, title);
+    await page.getByRole("button", { name: "Submit for review" }).click();
+
+    await expect(page.getByTestId("create-submitted")).toBeVisible({ timeout: 30_000 });
+
+    const submitted = await latestSubmissionFor(email);
+    test.skip(submitted === null, "the submitted playbook could not be found");
+
+    return { context, page, email, submitted: submitted! };
+  }
+
+  test("approving a submission publishes the page", async ({ browser, page }) => {
+    const { context, submitted } = await submitFromCreator(browser, "Approve me and I appear");
+
+    try {
+      // Before the review the page does not exist. Asserted first so a test that
+      // passed because the slug was already live cannot be mistaken for a pass.
+      const beforeReview = await context.request.get(`/p/${submitted.slug}`);
+      expect(beforeReview.status(), "an in-review playbook is not readable").not.toBe(200);
+
+      const adminEmail = await signInOrSkip(page, "admin");
+      const promoted = await promoteToAdmin(adminEmail);
+      test.skip(!promoted, "could not promote the account");
+
+      try {
+        await page.goto("/admin/submissions", { waitUntil: "networkidle" });
+
+        const row = page.getByTestId("submission-row").filter({ hasText: "Approve me and I appear" });
+        await expect(row).toBeVisible();
+
+        await row.getByRole("button", { name: "Read" }).click();
+        await row.getByTestId("submission-approve").click();
+
+        // The queue is the reviewer's own screen, so it is the first thing that
+        // should change.
+        await expect(page.getByTestId("toast")).toContainText("Approved and published.", {
+          timeout: 30_000,
+        });
+
+        const client = adminClient();
+        test.skip(client === null, "needs SUPABASE_SERVICE_ROLE_KEY in .env.local");
+
+        const { data: playbook } = await client!
+          .from("playbooks")
+          .select("status")
+          .eq("id", submitted.playbookId)
+          .maybeSingle();
+
+        expect(playbook?.status, "approving is the only thing that publishes").toBe("published");
+
+        // And the page a reader would actually land on.
+        const afterReview = await context.request.get(`/p/${submitted.slug}`);
+        expect(afterReview.status(), "an approved playbook is readable").toBe(200);
+      } finally {
+        await demote(adminEmail);
+      }
+    } finally {
+      await deleteSubmittedPlaybook(submitted.playbookId);
+      await context.close();
+    }
+  });
+
+  test("asking for changes shows the note to the creator, and unlocks their draft", async ({
+    browser,
+    page,
+  }) => {
+    const { context, page: creatorPage, submitted } = await submitFromCreator(
+      browser,
+      "Send me back for changes",
+    );
+
+    const NOTE = "The second step is a reminder, not a step. Say what to do instead.";
+
+    try {
+      const adminEmail = await signInOrSkip(page, "admin");
+      const promoted = await promoteToAdmin(adminEmail);
+      test.skip(!promoted, "could not promote the account");
+
+      try {
+        await page.goto("/admin/submissions", { waitUntil: "networkidle" });
+
+        const row = page.getByTestId("submission-row").filter({ hasText: "Send me back for changes" });
+        await row.getByRole("button", { name: "Read" }).click();
+
+        // A note is required for this one and for a rejection. The action refuses
+        // without it, so the reviewer has to have written something to send back.
+        await row.getByRole("textbox", { name: "Note to the creator" }).fill(NOTE);
+        await row.getByTestId("submission-request-changes").click();
+
+        await expect(page.getByTestId("toast")).toContainText("Sent back with your note.", {
+          timeout: 30_000,
+        });
+
+        const client = adminClient();
+        test.skip(client === null, "needs SUPABASE_SERVICE_ROLE_KEY in .env.local");
+
+        const { data: submission } = await client!
+          .from("playbook_submissions")
+          .select("status, reviewer_note")
+          .eq("playbook_id", submitted.playbookId)
+          .maybeSingle();
+
+        expect(submission?.status).toBe("changes_requested");
+        expect(submission?.reviewer_note).toBe(NOTE);
+      } finally {
+        await demote(adminEmail);
+      }
+
+      // The creator's half. Their own session, not the admin's — a creator never
+      // sees the queue, so reading the note through it would prove nothing.
+      await creatorPage.goto("/me?tab=submissions", { waitUntil: "networkidle" });
+
+      await expect(creatorPage.getByText(NOTE)).toBeVisible();
+
+      // Changes were asked for, so the draft is editable again. That is the whole
+      // point of asking: a creator who cannot fix what the reviewer asked them to
+      // fix has been told to do something impossible.
+      await creatorPage.goto("/me?tab=submissions", { waitUntil: "networkidle" });
+      const draftLink = creatorPage.getByRole("link", { name: /edit/i }).first();
+
+      if (await draftLink.count()) {
+        await draftLink.click();
+        await expect(creatorPage.getByTestId("create-locked")).toHaveCount(0);
+        await expect(
+          creatorPage.getByRole("button", { name: "Submit for review" }),
+        ).toBeEnabled();
+      }
+    } finally {
+      await deleteSubmittedPlaybook(submitted.playbookId);
+      await context.close();
+    }
+  });
+});

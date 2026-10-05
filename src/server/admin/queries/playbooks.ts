@@ -54,6 +54,15 @@ export async function listAdminPlaybooks(
   let query = client
     .from("playbooks")
     .select(LIST_SELECT)
+    // `in_review` is excluded, and always — including from the "any" tab.
+    //
+    // It is not an oversight that this list is not the whole table. A submission
+    // is not half-finished admin content: its decision lives in
+    // `playbook_submissions`, its reviewer note has an audience of one creator,
+    // and the core editor here cannot even represent its status. Listing it twice
+    // would put a row in this table that opens a form which refuses to save.
+    // `/admin/submissions` is the one place a submission appears.
+    .neq("status", "in_review")
     .order("updated_at", { ascending: false })
     .limit(500);
 

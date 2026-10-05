@@ -22,6 +22,7 @@ const SECTIONS: { href: string; label: string; exact?: boolean }[] = [
   { href: "/admin/reports", label: "Reports" },
   { href: "/admin/evidence", label: "Evidence" },
   { href: "/admin/playbooks", label: "Playbooks" },
+  { href: "/admin/submissions", label: "Submissions" },
   { href: "/admin/collections", label: "Starter kits" },
   { href: "/admin/use-cases", label: "Use cases" },
   { href: "/admin/requests", label: "Requests" },

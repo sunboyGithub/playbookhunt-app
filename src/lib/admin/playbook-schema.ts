@@ -32,9 +32,14 @@ const optionalText = (max: number) =>
  *
  * `status` is here and not elsewhere because publishing is the single most
  * consequential button in the admin area: it puts a page on the internet and
- * starts the 15-minute cron counting tries for it. It is validated against the
- * same three values the column's check constraint allows, so a status invented
- * here cannot become a status the site cannot read.
+ * starts the 15-minute cron counting tries for it.
+ *
+ * The enum has three of the column's four values, not four. `in_review` is
+ * missing on purpose: it belongs to a creator's submission, it is set by
+ * `submit_playbook` and cleared by a review decision, and letting this form write
+ * it would mean a reviewer could push a playbook back into a queue they are not
+ * looking at. `listAdminPlaybooks` excludes the same value, so this form is never
+ * handed a row it cannot represent.
  */
 export const coreFieldsSchema = z.object({
   id: z.string().uuid(),

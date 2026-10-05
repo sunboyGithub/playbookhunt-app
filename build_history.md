@@ -2131,7 +2131,7 @@ the state it meant to check and was never exercised against a second toast.
 | --- | --- |
 | `pnpm typecheck` | Clean |
 | `pnpm exec eslint src e2e scripts` | Clean (exit 0, no output) |
-| `pnpm lint` | **Fails, and not on source.** See below. |
+| `pnpm lint` | **Failed on generated output at this commit** — fixed in the next entry. |
 | e2e suite | **Not re-run** — see below |
 | `git status` after commit | Clean |
 
@@ -2147,8 +2147,8 @@ written a report into the working tree, which is why the P10b record shows a cle
 `pnpm lint` and this one does not.
 
 `pnpm exec eslint src e2e scripts` is clean, so no source file is implicated. The
-fix is two more entries in `globalIgnores`; it is left undone here because that is
-a config change, and this commit is the test fix rather than the lint config.
+fix is more entries in `globalIgnores`; it is not done here — this commit is the
+test fix, not the lint config — and is the next entry instead.
 
 ### Still unverified
 
@@ -2162,5 +2162,40 @@ a config change, and this commit is the test fix rather than the lint config.
   cache does not address it and is not meant to.
 - **The flakiness recorded by P10 and P10b is not claimed fixed.** This removes one
   source of load; whether the remaining failures go with it has not been measured.
-- **`pnpm lint` still fails in any working tree that holds a Playwright report.**
-  See above.
+
+---
+
+## Lint config — stop linting Playwright's report
+
+**Status:** complete. Commit `25b8cfc`, branch `main`, 1 file. Pushed.
+
+The harness follow-up above recorded `pnpm lint` failing with 3054 problems, all
+of them in the generated, gitignored `playwright-report/`. This is the config fix
+it named.
+
+`eslint.config.mjs`'s `globalIgnores` covered `.next/**`, `out/**`, `build/**` and
+`next-env.d.ts` but none of the test output, even though `.gitignore` has ignored
+it since P1. ESLint walks the working tree, not the index, so the moment a run
+left a report behind, `pnpm lint` was linting Playwright's bundled trace viewer —
+259 errors and 2795 warnings in third-party code that is not ours to fix.
+
+The ignore list now mirrors the "Testing" block in `.gitignore`: `coverage/**`,
+`playwright-report/**`, `test-results/**`, `blob-report/**`. `coverage/` and
+`blob-report/` had the same hazard and no artifact on disk to expose it, which is
+the argument for mirroring the list rather than adding only the one directory that
+happened to be present.
+
+### Checks
+
+| Check | Result |
+| --- | --- |
+| `pnpm lint` | Clean, exit 0 — was 3054 problems at `f56b915` |
+| `pnpm exec eslint src e2e scripts` | Clean, unchanged |
+| `git status` after commit | Clean |
+
+### Still unverified
+
+- **Nothing.** This is a nine-line ignore list, and the command that found the
+  problem is the command that proves it fixed. The one judgement in it — that no
+  source finding is being hidden — is supported by `src`, `e2e` and `scripts`
+  having been clean under their own invocation *before* the ignore existed.

@@ -615,6 +615,26 @@ a green check.
 **A cost that is not this commit's to bill.** `pnpm lint` fails on this working
 tree — 3054 problems, every one of them in `playwright-report/trace/`, generated
 and gitignored, and not covered by `eslint.config.mjs`'s `globalIgnores`. Nothing
-was spent fixing it; it is noted because a bare `pnpm lint` will keep failing for
-anyone whose last run left a report behind, which makes "lint clean" a check that
-quietly stopped meaning what the earlier entries say it means.
+was spent fixing it here; the next entry does, in nine lines. It is worth naming
+because a bare `pnpm lint` kept failing for anyone whose last run left a report
+behind — a pass/fail check that depends on which artifacts happen to be present is
+not the check the earlier entries recorded as "Clean".
+
+---
+
+## Lint config — the ignore list
+
+Commit `25b8cfc`. Token cost: **`unavailable`**, as everywhere in this file.
+
+### What this cost
+
+Almost nothing: one file, nine lines, and the command that found the problem is
+the command that proves it fixed. The only judgement it needed was to mirror
+`.gitignore`'s whole "Testing" block rather than add the one directory that
+happened to be present — `coverage/` and `blob-report/` had the identical hazard
+and simply had no artifact on disk to demonstrate it.
+
+Worth recording as a genre, though. This is a check that quietly stopped meaning
+what it said: `pnpm lint` was written down as "Clean" in the P10b table and stayed
+green only until the first Playwright report landed in the working tree. Nothing
+about the code changed between those two runs.

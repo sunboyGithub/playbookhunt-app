@@ -1908,3 +1908,171 @@ landed", not "the table has one row".
 - **`/api/revalidate` is still unauthenticated**, as at P9.
 - **Email has still never sent a message.** `pnpm add resend @react-email/components
   @react-email/render` remains unrun.
+
+---
+
+## P10b — `/create`, the submissions queue, and the review round trip
+
+**Status:** complete. Commit `49278e1`, branch `main`, 38 files. Not pushed.
+
+### What was built
+
+A creator can now write a playbook and put it in front of a reviewer. A
+reviewer can approve it, ask for changes, or reject it from
+`/admin/submissions`. Approving *is* publishing — there is deliberately no
+separate publish button beside approve, because a submission is `in_review` and
+RLS publishes nothing but `status = 'published'`, so a second button would be a
+way to make something public without reviewing it.
+
+**The create form** (`src/components/create/`) is six sections — outcome, who it
+is for, inputs, prompt, steps, testing — with jump links, because on a 390-wide
+screen the submit button is at the bottom of a long scroll. Autosave is a 1200ms
+debounce with no save button. The prompt is *generated* from the title and inputs
+until the creator edits it, and stops following the title after that: an insert
+button copies each input's key rather than having it retyped, because
+`{{input_1_provider}}` and `{{input_1_placeholder}}` both look right on screen
+and only differ to whoever pastes the prompt into an agent. Preview renders the
+prompt with a sample answer, templated client-side — no input value is ever sent
+to the server or to analytics.
+
+**`submit_playbook`** (migration 15) is the only writer of `playbooks.author_id`
+and `playbooks.status`. Ownership is settled before any content is looked at, and
+it writes the draft → playbook link *before* the submission row, which is what
+makes resubmission possible at all: a creator sent back with "changes requested"
+edits the same draft and submits again, keeping the slug and getting version *n+1*
+rather than an orphan playbook.
+
+**`playbooks.current_version_id` now points at the version that was just
+inserted.** It did not, and nothing caught it because the column was nullable and
+nothing read it.
+
+### The composite foreign key
+
+`playbooks` gained `foreign key (id, current_version_id) references
+playbook_versions (playbook_id, id)`, replacing a plain `current_version_id`
+foreign key. The plain version could not do the job: it constrains the version id
+to *some* version, not to a version belonging to *this* playbook. The pgTAP test
+for that wrote `throws_ok … 23503` and **passed without raising** against the
+plain constraint. It now raises.
+
+### Four defects, all found by running the flow rather than reading it
+
+**1. Every autosave failed, with a blank error.** `update()` spread
+`syncPrompt`'s result into the draft state. `syncPrompt` returns
+`{ prompt, touched }` — `touched` is the flag's name in `example.ts` — so the
+draft gained a `touched` key instead of setting `promptTouched`. The payload
+schema is `.strict()`, so **every save was rejected**.
+
+This is the `.strict()` design working as intended, and it is worth being precise
+about that: `.strict()` is there so a hand-rolled request cannot smuggle `status`
+or `author_id` into the draft. It also caught an internal field-name drift that
+no type caught, because the spread widened the type without erroring. A schema
+that stops an attacker and also stops a typo is the better schema.
+
+**2. The error the creator saw was a field name, or nothing.**
+`saveDraft` returned `error: firstError(errors)`. `firstError` returns the **key**
+of the first bad field — it exists to drive focus — so a rejected save reported
+`"title"`. And because `.strict()` reports an extra key against the *object*,
+that issue's path was empty, `pathToKey([])` returned `""`, and the message
+landed under a key no control has: the creator saw an empty error line. Two fixes:
+`errorsFromIssues` now handles `unrecognized_keys` and names the offending fields
+("This draft has a field it should not: touched."), and `saveDraft` looks the
+message up by key, as the submit path already did.
+
+**3. The autosave looped forever.** The effect's dependency list included
+`persist`, which closes over `draftId` and `revision` — both of which a successful
+save updates. So every save re-armed the 1200ms timer that produced the next one.
+The status line sat on "Saving…" for as long as the form was open. The timer now
+reads the latest `persist` through a ref and the effect depends only on the
+content, which is what "there is something new to save" actually means. The ref
+is assigned in an effect rather than during render, because writing a ref during
+render is a side effect and React Compiler says so.
+
+**4. Submitting created two drafts.** The debounce is 1200ms. A creator who reads
+the form and presses submit inside that window has no draft id yet, so the
+submission creates draft B while the timer goes on to create draft A. `/me`
+then showed the same playbook twice — "With a reviewer" and "Draft, not
+submitted" — and the creator could not delete the second. `submit` now cancels
+the pending timer and awaits the flush, using the id that flush returned. That
+needs a ref rather than state: `setDraftId` has not taken effect by the time the
+code after `await` reads state, so a submit that flushed its own save would still
+have submitted the previous id, or none.
+
+### Checks
+
+| Check | Result |
+| --- | --- |
+| `pnpm lint` | Clean |
+| `pnpm typecheck` | Clean |
+| `pnpm vitest run` | 676 passed |
+| `pnpm exec supabase test db` | 152 passed across 7 files |
+| `pnpm build` | Succeeds; `/create` and `/admin/submissions` both present |
+| `e2e/create.spec.ts`, desktop + mobile | **20/20 passed**, twice in a row |
+| Full non-admin e2e, both viewports | 144 passed / 0 failed on one run |
+| Secret scan of the commit | `src`, `supabase`, `e2e`, `scripts` clean; `.env.local` ignored |
+| `git status` after commit | Clean |
+
+### What to look at in a browser
+
+- `/create` **signed out** — the whole form renders, and it says *"Sign in to save
+  your work as you go"* at the point where that becomes true rather than
+  redirecting. Type into it: nothing errors, nothing is saved.
+- `/create` **signed in** — type a title, wait ~1.5s, and watch the status line
+  go Saving… → Draft saved. Submit an empty form: the first invalid field is
+  focused and its message is next to it.
+- Add three inputs, tick two **Required**, and try to tick the third — it is
+  disabled and says why. Untick one and it becomes available again.
+- `/admin/submissions` **as an administrator** — expand a row with **Read**:
+  prompt, inputs, steps, who it is for, and the creator's own note are all there
+  without leaving the page. Approve, and the page goes public. Ask for changes
+  and it refuses without a note.
+- The creator's own "what result did you got" is labelled *not a report, not
+  counted anywhere* wherever it appears, and approving does not set
+  `playbook_agents.tested`.
+
+### Two timeouts I changed, and why it is not papering over a flake
+
+The suite runs five browser contexts against one Postgres in Docker, and every
+assertion waits on something the local stack has to do first — a GoTruth
+`getUser()`, an RPC, a revalidation, a row becoming visible to a reader's RLS.
+Three different tests failed on three different 5s timeouts in a single run, each
+at a place that passes when the same file is run serially. `expect.timeout` is now
+15s, and one hardcoded `toPass({ timeout: 5_000 })` in `playbook-detail.spec.ts`
+was raised to match.
+
+This does not weaken the assertions that are deliberately about a race. Those
+expect a value to *stay* wrong, so they fail fast whichever way the timeout goes;
+and an assertion that previously gave up early and saw the pre-write state could
+pass for the wrong reason, so a longer window makes those stricter.
+
+### Still unverified
+
+- **The review round trip in `e2e/admin.spec.ts` is written and has never run.**
+  It promotes a throwaway account to `profiles.role = 'admin'` and demotes it
+  afterwards. A request to run it was **refused by the permission classifier** on
+  the grounds that granting an administrator role was not something the owner had
+  authorised. It was not worked around, and the tests are committed unrun. This
+  is the one part of this milestone with no evidence behind it, and the two
+  things it asserts that nothing else covers are: approving makes
+  `/p/<slug>` return 200 (not just `status = 'published'` in the row), and a
+  "changes requested" note reaches the creator's own session on `/me` and
+  unlocks their draft.
+- **No human has looked at any of it.** The suite asserts test ids, status
+  codes, one or two text lines and the database rows. It does not know whether
+  `/create` is pleasant to fill in over six sections.
+- **The pre-existing load flakiness is reduced, not fixed.** See the P10
+  follow-up entry, which recorded the same symptom in `home`, `sign-in`,
+  `me-and-report` and `ranking`. `e2e/support/db.ts:authUserId` resolves an
+  address by paging `auth.users` at 1000 per page and reading only page 1 — at
+  229 local users that is one round trip, but it is called inside `toPass` retry
+  loops and will silently start returning `null` once the local database passes
+  1000 accounts, which repeated runs are heading towards. **That is the next thing
+  to fix in the suite, and it is not fixed here.**
+- **8 e2e tests are skipped by design** — the four `navigation.spec.ts`
+  "keeps the current page visible" tests per viewport, which measure mid-flight
+  rendering and are meaningless against a dev server that compiles on demand. They
+  require `E2E_TARGET=prod`.
+- **`strongest_eligible` is still rendered by nothing**, as at P9.
+- **`/api/revalidate` is still unauthenticated**, as at P9.
+- **Email has still never sent a message.** `resend`, `@react-email/components`
+  and `@react-email/render` are installed and unused; that is P11.

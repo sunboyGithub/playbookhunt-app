@@ -530,3 +530,57 @@ written them.
 - If OpenRouter or `/cost` figures are added, put them in the table with their
   source and date, and note that they are provider-reported rather than
   session-measured.
+
+---
+
+## P10b — `/create` and the submissions queue
+
+Commit `49278e1`. Token cost: **`unavailable`**, as for every milestone in this
+file. No measurement source exists for this session, and no estimate is
+substituted for one.
+
+### What this milestone cost, in the only currency I can report honestly
+
+Not tokens — round trips through the permission classifier, and three of them
+were refusals that cost real time and taught something.
+
+**A refactor of my own mistake, caught by a tool that was right.** The first
+attempt at the autosave fix assigned `persistRef.current = persist` during
+render. `eslint` refused it (`react-hooks/refs`) and the rule was correct: writing
+a ref during render is a side effect. It moved into an effect declared *above*
+the autosave effect, so effects run in declaration order and the timer is always
+handed the current callback. Cost: one lint run, about thirty seconds. Worth
+recording because the instinct was to reach for `eslint --fix` or a disable
+comment, and the correct fix was to change the design.
+
+**The debugging that paid for itself.** The first e2e run gave 5 passed, 5
+failed. Guessing from the failure messages would have produced three wrong fixes
+in a row. Writing `e2e/debug-create.spec.ts` to print the *actual* value —
+`SUBMIT ERROR: [ 'User input 1 needs a name.' ]` — took one run and identified
+all four problems at once, two of which were my test's fault and two of which
+were the product's. Deleted afterwards. This is the P6 pattern again: an
+assumption that was never exercised.
+
+**Three real defects that only a running page could find.** The `touched` vs
+`promptTouched` drift, `firstError` returning a field key where a sentence was
+wanted, the autosave loop, and the duplicate draft on submit. None of these is
+findable by reading `create-form.tsx`; all four are obvious the moment a browser
+is pointed at the page. The `touched` one is the strongest argument in this
+milestone for `.strict()` — it caught an internal naming drift that TypeScript
+let through, at the same time it was doing its actual job of refusing `status` and
+`author_id`.
+
+**A denial I did not route around.** Running `e2e/admin.spec.ts` was refused
+because it calls `promoteToAdmin`, granting `profiles.role = 'admin'`, and the
+owner had not authorised that. The refusal is recorded in
+[build_history.md](build_history.md) as an unverified criterion rather than
+quietly retried in smaller pieces. Running the *other* eight specs — which do not
+promote anyone — was explicitly permitted as a subset, and that is what the green
+full-suite run covers.
+
+**One thing I chose not to fix.** `e2e/support/db.ts:authUserId` reads only page 1
+of a 1000-row `auth.users` page and will start returning `null` for real test
+accounts once the local database crosses 1000 users. It is at 229. Fixing it
+means changing how every test resolves an address, which is P9-era test
+infrastructure and not this milestone's work — so it is documented as the next
+thing rather than half-done here.

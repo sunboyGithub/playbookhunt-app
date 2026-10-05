@@ -25,12 +25,12 @@
  * projects — can never be signed in by each other's mail.
  */
 
+import { randomUUID } from "node:crypto";
+
 import { test, type Page } from "@playwright/test";
 
 import { adminClient } from "./db";
 import { mailpitReachable, waitForSignInLink } from "./mailpit";
-
-let counter = 0;
 
 /**
  * Sign in, or skip the test — and hand back the address either way.
@@ -52,10 +52,26 @@ export async function signInOrSkip(page: Page, prefix = "reader"): Promise<strin
   return address;
 }
 
-/** A per-run address, so no test can be signed in by another's mail. */
+/**
+ * An address no other test in this run will use.
+ *
+ * The uniqueness has to hold across *processes*, not just within one. This used
+ * to be `Date.now()` plus a module-level counter, which is unique inside a
+ * worker and nothing like it across five of them: two workers that called it in
+ * the same millisecond with the same counter produced the same address, both
+ * asked GoTrue to sign that address up at once, and one got a 500 —
+ * `duplicate key value violates unique constraint "users_email_partial_key"`.
+ *
+ * The failure surfaced a long way from its cause. The rejected signup never
+ * reached the "check your email" screen, so the test timed out waiting for
+ * `check-email` and reported *that*, which reads like a broken sign-in form and
+ * moves between runs because it depends on which workers happened to overlap.
+ *
+ * `randomUUID` removes the whole class: two processes cannot collide on it
+ * without one of them being extraordinarily unlucky.
+ */
 export function freshEmail(prefix = "reader"): string {
-  counter += 1;
-  return `${prefix}-${Date.now().toString(36)}-${counter}@example.test`;
+  return `${prefix}-${randomUUID().slice(0, 8)}@example.test`;
 }
 
 /**

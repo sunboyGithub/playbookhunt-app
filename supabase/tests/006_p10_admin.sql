@@ -7,7 +7,7 @@ begin;
 -- bypasses RLS), then `set local role` to the role being tested. The role
 -- matters: this connection is the table owner, so a test that only sets
 -- `request.jwt.claims` asserts nothing.
-select plan(20);
+select plan(25);
 
 /* ==========================================================================
    Fixtures
@@ -38,6 +38,17 @@ select is(
 
 reset role;
 
+-- The audit log is append-only by design, which means it is never empty once
+-- anything has used the admin area — and the e2e suite uses it, since every
+-- admin action writes a row. These assertions therefore count *this fixture's*
+-- row rather than the table, which is both independent of whatever else is in
+-- there and a stronger statement: "this write landed", not "the table has one
+-- row in it".
+--
+-- Scoping on all three of `admin_id`, `action` and `target` is what makes it
+-- unique. The fixture's target is the string `a-report`, which nothing else in
+-- the project can produce.
+--
 -- One row written as the owner, the way `writeAdminAction` does it.
 insert into public.admin_actions (admin_id, action, target, payload)
 values (
@@ -48,7 +59,12 @@ values (
 );
 
 select is(
-  (select count(*) from public.admin_actions),
+  (
+    select count(*) from public.admin_actions
+    where admin_id = '91000000-0000-0000-0000-000000000001'
+      and action = 'report.approve'
+      and target = 'a-report'
+  ),
   1::bigint,
   'the server can write the log'
 );
@@ -61,7 +77,12 @@ set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"91000000-0000-0000-0000-000000000001","role":"authenticated"}', true);
 
 select is(
-  (select count(*) from public.admin_actions),
+  (
+    select count(*) from public.admin_actions
+    where admin_id = '91000000-0000-0000-0000-000000000001'
+      and action = 'report.approve'
+      and target = 'a-report'
+  ),
   1::bigint,
   'an admin can read the log'
 );
@@ -105,41 +126,98 @@ values
   ('dispute a charge on my card', 'billing', now() - interval '2 days'),
   ('cancel my subscription', 'billing', now() - interval '1 day');
 
--- As a reader, the function does not exist for them. It is SECURITY DEFINER
--- with the check inside, and granted to service_role alone — so this raises
--- rather than returning an empty set.
+-- The grant is asserted directly rather than inferred from a call raising.
+--
+-- Migration 13 revoked from `public` and granted to `service_role`, and believed
+-- it had narrowed the grant. It had not: Supabase's default privileges for the
+-- migration role write explicit `anon` and `authenticated` EXECUTE entries when
+-- the function is *created*, and `revoke ... from public` does not touch those.
+-- The old test here could not see it, because it ran as `authenticated` and
+-- asserted only that the call raised — which it did, for the wrong reason, via
+-- the in-function guard. Two tests, one passing for the wrong reason, one proving
+-- the opposite of the design.
+--
+-- `has_function_privilege` is asked for each role by name, which is the claim
+-- itself rather than a consequence of it.
+select is(
+  has_function_privilege('anon', 'public.admin_request_inbox(uuid,real)'::regprocedure, 'execute'),
+  false,
+  'a signed-out visitor cannot execute the request inbox'
+);
+
+select is(
+  has_function_privilege('authenticated', 'public.admin_request_inbox(uuid,real)'::regprocedure, 'execute'),
+  false,
+  'a signed-in reader cannot execute the request inbox'
+);
+
+select is(
+  has_function_privilege('service_role', 'public.admin_request_inbox(uuid,real)'::regprocedure, 'execute'),
+  true,
+  'the application can execute the request inbox'
+);
+
+-- Two refusals with two different messages, because they have two different
+-- causes and a test that cannot tell them apart proves nothing.
+--
+-- The first is the ACL: `authenticated` has no EXECUTE at all, so it never
+-- reaches the body. It says so by naming the permission, and this is deliberately
+-- tested with an *admin* `sub` — under migration 13 that session could execute
+-- the function, which is precisely the hole.
 set local role authenticated;
-select set_config('request.jwt.claims', '{"sub":"91000000-0000-0000-0000-000000000002","role":"authenticated"}', true);
+select set_config('request.jwt.claims', '{"sub":"91000000-0000-0000-0000-000000000001","role":"authenticated"}', true);
 
 select throws_ok(
-  $$select * from public.admin_request_inbox()$$,
+  $$select count(*) from public.admin_request_inbox('91000000-0000-0000-0000-000000000001'::uuid)$$,
   '42501',
-  null,
-  'a non-admin cannot execute the request inbox'
+  'permission denied for function admin_request_inbox',
+  'even an admin session has no grant: the guard is not what stops it'
 );
 
 reset role;
 
--- And as an admin session it still refuses: the guard is `is_admin()`, and a
--- service-role connection with no `sub` claim is not an administrator either.
--- The application calls it with the service key *after* its own check, which is
--- the only combination these two clauses are meant to allow.
-set local role authenticated;
-select set_config('request.jwt.claims', '{"sub":"91000000-0000-0000-0000-000000000001","role":"authenticated"}', true);
+-- The second is the guard itself, reached only by the one role that has a grant.
+-- A `service_role` key carries no `sub`, so the function cannot work out who is
+-- calling — it is handed an id and checks the row still says `admin`. That is a
+-- staleness check, not authentication, and these three assertions are what it is
+-- supposed to catch: a call site passing the wrong id, a session demoted since
+-- the page rendered, and a missing id.
+set local role service_role;
+
+select throws_ok(
+  $$select count(*) from public.admin_request_inbox('91000000-0000-0000-0000-000000000002'::uuid)$$,
+  '42501',
+  'admin_request_inbox: administrator access required',
+  'a reader id is refused even by the role that has the grant'
+);
+
+select throws_ok(
+  $$select count(*) from public.admin_request_inbox(null::uuid)$$,
+  '42501',
+  'admin_request_inbox: administrator access required',
+  'a missing id is refused rather than treated as unrestricted'
+);
 
 select lives_ok(
-  $$select count(*) from public.admin_request_inbox()$$,
-  'an admin session may execute the request inbox'
+  $$select count(*) from public.admin_request_inbox('91000000-0000-0000-0000-000000000001'::uuid)$$,
+  'the application reaches the inbox with an administrator id'
 );
 
 select is(
-  (select count(distinct group_key) from public.admin_request_inbox(0.55)),
+  (
+    select count(distinct group_key)
+    from public.admin_request_inbox('91000000-0000-0000-0000-000000000001'::uuid, 0.55)
+  ),
   2::bigint,
   'two pairs and two singletons, not one group and not four'
 );
 
 select is(
-  (select count(*) from public.admin_request_inbox(0.55) where group_key <> id),
+  (
+    select count(*)
+    from public.admin_request_inbox('91000000-0000-0000-0000-000000000001'::uuid, 0.55)
+    where group_key <> id
+  ),
   2::bigint,
   'each row that resembles an earlier one is filed under it'
 );
@@ -151,8 +229,9 @@ select is(
 select is(
   (
     select r2.query
-    from public.admin_request_inbox(0.55) r1
-    join public.admin_request_inbox(0.55) r2 on r2.group_key = r1.group_key
+    from public.admin_request_inbox('91000000-0000-0000-0000-000000000001'::uuid, 0.55) r1
+    join public.admin_request_inbox('91000000-0000-0000-0000-000000000001'::uuid, 0.55) r2
+      on r2.group_key = r1.group_key
     where r1.query = 'cancel my subscription' and r1.created_at = now() - interval '4 days'
     order by r2.created_at
     limit 1
@@ -163,7 +242,7 @@ select is(
 
 select ok(
   exists (
-    select 1 from public.admin_request_inbox(0.95)
+    select 1 from public.admin_request_inbox('91000000-0000-0000-0000-000000000001'::uuid, 0.95)
     where query = 'how do I cancel my subscription' and group_key = id
   ),
   'a strict threshold stops filing a different wording under an earlier request'

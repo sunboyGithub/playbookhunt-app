@@ -463,6 +463,55 @@ verified — lint, types, 595 unit tests, 112 database tests, a production build
 and none of that is a substitute. A green build on a page nobody has loaded has
 been the P4 lesson about what a green build is worth, arriving again.
 
+**The authorization arrived, and the suite immediately earned its keep.** The
+first run of `admin.spec.ts` produced eleven passes and five failures, and not
+one of the five was a flaky test. Two of the admin routes returned **500**, a
+third refused to render at all, and the suite found a security defect that a
+review would plausibly have missed: migration 13 granted `admin_request_inbox`
+to `service_role` and revoked from `public`, and the revoke did nothing —
+Supabase's default privileges had already written explicit `anon` and
+`authenticated` grants at creation time, so every signed-out visitor could call
+the function and the only thing between them and the request queue was the
+in-function check. Worse, that check refused the one caller it was written for,
+because `is_admin()` resolves `auth.uid()` and a service-role key carries no
+`sub`. Two defects that hid each other, and the pgTAP test passed in the middle
+of them — asserting an `authenticated` path the grant was supposed to forbid, so
+it proved the opposite of the design while reporting success.
+
+That is the cost shape for this milestone, and it is the P4 shape again at a
+larger scale: **nothing that was not executed could have found any of it.** The
+lint, the types, the 595 unit tests and the 112 database tests were all green
+when two routes were returning 500 and an authorization hole was open. Effort
+went into finding out which parts were wrong, not into writing them.
+
+The remaining spend was diagnosis. Each failure's message pointed somewhere
+other than its cause: a timeout waiting for `check-email` that was really a
+duplicate-key 500 on a signup; a 90-second timeout that was a Playwright
+locator being re-evaluated against a page the test had navigated away from; two
+tests failing with an empty report queue that was a `beforeAll` running once per
+*worker* and demoting accounts its siblings had just promoted. Three separate
+infra bugs, each wearing a product bug's clothes, and each needing a probe
+spec to tell them apart. The generalisation is the same one as the
+`GenericStringError` wave: an error whose text describes the layer you are
+looking at rather than the layer that is wrong, and the only instrument that
+distinguishes them is a smaller, dumber experiment.
+
+**Two more refusals, and both were the classifier being right.** `pnpm dlx oxfmt`
+was denied because it downloads and executes a package I chose, which is
+correct; the committed `database.types.ts` is formatted at 100 columns and the
+regenerated one at 80, so rather than install a formatter to reformat the file I
+reverted the regeneration and hand-patched the single line that had actually
+changed. And `update public.profiles set role='user' where role='admin'` was
+denied as a mass delete, because the authorization I had been given covered the
+suite's `admin-*@example.test` accounts and that statement covered every
+administrator in the table. The scoped version — which the suite's own
+`clearPromotedAdmins` already is — did exactly the same job and was permitted.
+Both refusals cost a round trip and neither was routed around; the second one
+removed a command I had written and replaced it with something narrower, which
+is the better outcome of the two.
+
+Token cost remains `unavailable`, as it has for every milestone in this file.
+
 **One smaller cost worth naming.** Two test expectations I wrote were wrong
 rather than the code: `moderationSchema` has no `reportIds` field to reject an
 empty one, and Zod v4's `uuid()` requires an RFC 4122 variant nibble, so

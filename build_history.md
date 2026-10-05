@@ -1706,18 +1706,193 @@ than pass quietly.
 
 ### Blocks and unverified criteria
 
-- **`e2e/admin.spec.ts` has not been run.** It is written (8 tests: four for the
-  404 gate, two for the promoted-account flow including a walk of all seven
-  queues, and two for moderation moving the public page). The `playwright` command
-  was refused by the safety classifier three times, the last with a specific
-  reason: *"The Playwright suite promotes a runtime-selected account to the admin
-  role, requiring explicit authorization that names the account and admin grant."*
-  That is a fair objection — `e2e/support/admin.ts` promotes an address generated
-  at runtime — and it needs the owner's explicit authorisation rather than a
-  redesign. **The admin UI has therefore never been rendered by a browser.**
-  Every check above is static, database-level, or a unit test — with one
-  exception, confirmed live: a signed-out request to `/admin` returns **404**
-  with Next's not-found body and no mention of administrators or moderation.
+- **`e2e/admin.spec.ts` now runs, and it found four real bugs.** See
+  [P10 follow-up: the admin area in a browser](#p10-follow-up-the-admin-area-in-a-browser)
+  below. The short version: two routes were returning 500 and one grant was far
+  wider than intended. All are fixed; the suite is 16/16 across both viewports.
+  What it has *not* done is look at the admin area the way a person would — no
+  screenshot, no visual check of the version editor or the request inbox, only
+  what an automated assertion can reach.
+- **`e2e/support/admin.ts` promotes via a direct UPDATE**, which is the same one
+  line `scripts/promote-admin.ts` runs. Shelling out to the script from the suite
+  would put a subprocess and an env-file dependency in the path of every run to
+  execute one line of SQL; the script itself is exercised by the documented manual
+  flow.
+- **`strongest_eligible` is still rendered by nothing.** P9 recorded this as a
+  gap: "Proven to work" needs 20 reports *and* 3 evidence-approved, and no fixture
+  reaches it because no seed creates `report_evidence` rows. The evidence queue
+  can now create them — a human uploading one and approving it — but the gate
+  cannot be demonstrated from fixtures, and no fixture does.
+- **The submissions queue (P10b) is not here.** The brief defers it to the next
+  prompt and nothing in this milestone reads `playbook_submissions`.
+- **`/api/revalidate` is still unauthenticated**, as at P9.
+- **Email has still never sent a message.** `pnpm add resend @react-email/components
+  @react-email/render` remains unrun.
+
+---
+
+## P10 follow-up: the admin area in a browser
+
+The owner authorised the suite explicitly — it may promote its own throwaway
+`admin-*@example.test` accounts to `profiles.role = 'admin'` against the local
+stack and demote them afterwards — and the suite ran.
+
+### What was built
+
+Nothing new in the admin area itself. This is what running it found.
+
+**1. `/admin/evidence` returned 500.** `report_evidence` has exactly one foreign
+key and it points at `outcome_reports`; the playbook is a second hop away.
+`EVIDENCE_SELECT` asked PostgREST to embed `playbooks!inner(...)` from
+`report_evidence`, which is `PGRST200 — no relationship found`. The queue was
+never reachable by a browser at all. Fixed by nesting the embed inside
+`outcome_reports!inner(...)`, which is the path that exists.
+
+**2. `/admin/requests` returned 500.** `admin_request_inbox` raised
+`42501: administrator access required` for the application itself. This one was
+two defects that hid each other, and it is the most serious thing found:
+
+- *The revoke did not revoke.* Migration 13 said
+  `revoke all on function … from public; grant execute … to service_role` and
+  recorded that it had narrowed the grant. It had not. Supabase sets
+  `alter default privileges in schema public grant execute on functions to anon,
+  authenticated, service_role` for the migration role, so *creating* the function
+  wrote explicit `anon=X` and `authenticated=X` ACL entries. `revoke … from
+  public` removed only the PUBLIC entry. **Every signed-out visitor and every
+  signed-in reader could execute the function**, and the only thing between them
+  and the request queue was the in-function check — which is exactly the
+  single-sentence version of the argument migration 13 makes against granting
+  it at all.
+- *The guard refused the only caller with a grant.* It was
+  `if not public.is_admin()`, and `is_admin()` resolves `auth.uid()`, which comes
+  from the caller's JWT `sub`. A `service_role` key is not a user session and
+  carries no `sub`, so `auth.uid()` is null and `is_admin()` is false — always,
+  for every caller that had survived the first defect.
+
+So the function was simultaneously open to the public and closed to its
+intended caller. Neither half was reachable.
+
+The pgTAP test sat in the middle of this and passed throughout. It ran as
+`authenticated` and asserted only that the call *raised*, which it did — for the
+privilege reason, not the reason it claimed. Its second assertion, `lives_ok`
+"an admin session may execute the request inbox", was true and was **the
+opposite of the design**: it was passing because `authenticated` could execute
+the function.
+
+**3. Migration 14 fixes both, and is honest about what the guard is.** The grant
+is now `revoke … from public, anon, authenticated; grant … to service_role`, and
+verified directly with `has_function_privilege` per role rather than inferred
+from a call raising. The guard can no longer authenticate a `service_role`
+caller, because `service_role` *is* the application and there is nothing behind
+the question. It now takes `p_admin_id` and checks that row still says `admin` —
+a much narrower claim, and the one that is true: it catches a call site passing
+the wrong id, a session demoted since the page rendered, and a stale refetch. The
+header says so in those words, because a guard whose comment overstates it is
+worse than no guard.
+
+**4. Three test-harness bugs, each wearing a product bug's clothes.**
+
+- *`freshEmail` collided across processes.* It was `Date.now()` plus a
+  module-level counter — unique inside a worker, and nothing like it across five.
+  Two workers in the same millisecond produced the same address, both asked
+  GoTrue to sign it up, and one got `500 duplicate key value violates unique
+  constraint "users_email_partial_key"`. The rejected signup never reached the
+  "check your email" screen, so the test timed out waiting for `check-email` and
+  blamed the sign-in form. Now a `randomUUID`.
+- *`beforeAll` runs per worker.* The sweep that demotes administrators left by a
+  crashed run was in `test.beforeAll`, which Playwright invokes once per worker.
+  A late-starting worker ran it while four siblings were mid-test, demoting the
+  accounts they had just promoted. Moved to `globalSetup`, which runs once per
+  run, before the first worker — the only hook with the right cardinality.
+- *A locator is a query, not a reference.* The moderation test navigated to
+  `/p/<slug>` and then clicked `report-approve` through a locator captured on the
+  queue page. Playwright re-evaluates it against the current page, so it looked
+  for the button on the public page, found nothing, and burned the whole 90s
+  timeout. A failure that reads like the button is broken.
+
+**5. The public page does not render report notes.** The moderation test asserted
+that an approved report's note appeared on `/p/<slug>`. `ReportList` renders the
+result, the amount, the agent and the date — it never renders the note, anywhere
+outside `/admin`. The test was asserting that the site quotes a stranger's free
+text, and the product was right and the test was wrong. The component's comment
+claimed notes were "shown as plain text, never as HTML", describing an intention
+the code never implemented; the comment now describes what the code does. The
+test asserts the approved-report **count** on the public page instead, which is
+computed from the same `public_reports` view the list is read from and is exactly
+the acceptance criterion.
+
+**6. The lock is now taken where the mutation is.** `withDbLock` guards the
+suite's direct database writes. It was being applied at the *call site*, so each
+one held a process-wide lock across a slow `listUsers` as well as the write, and
+with ten workers that is where the time went — tests were giving up on the lock.
+Each mutating helper in `e2e/support/admin.ts` now takes the lock itself, around
+its write and not its reads, so a test cannot forget to.
+
+**7. `supabase/config.toml` — local rate limits raised.** `email_sent` was **2**
+per hour and the suite sends one magic link per test, eight in this spec alone.
+GoTrue silently dropped the rest, and the symptom was a suite where a *different*
+set of tests failed on every run — the tests that got through signed in, the rest
+waited for a "check your email" screen that would never arrive. Raised to 1000,
+with `sign_in_sign_ups` and `token_verifications` alongside it because those are
+per-IP over a 5-minute window and a developer re-running a failing test spends
+the budget the first run left behind. **This file configures the local stack and
+is never read by a deployed project.**
+
+**8. The admin spec runs last, and alone.** It moderates a real report on
+`lower-your-internet-bill` through the UI, which recomputes that playbook's
+statistics — and `playbook-detail.spec.ts` and `me-and-report.spec.ts` assert on
+those exact figures. `withDbLock` cannot fix this: the mutation arrives through a
+server action triggered by a click, never touches the lock, and there is nowhere
+sensible to hold a process-wide lock around a page load. Playwright's project
+`dependencies` is the mechanism that fits, so `admin-desktop` and `admin-mobile`
+wait for `desktop` and `mobile` to finish.
+
+**9. A pgTAP fixture measured the test runner.** "the server can write the log"
+counted all of `admin_actions` and expected 1 — but every admin action writes an
+audit row, so after the e2e suite had run there were 23. The assertions now
+count *this fixture's* row, scoped on all three of `admin_id`, `action` and
+`target`. That is both independent of history and a stronger claim: "this write
+landed", not "the table has one row".
+
+### Checks and results
+
+| Check | Result |
+|---|---|
+| `pnpm lint` | clean |
+| `pnpm typecheck` | clean |
+| `pnpm test` | **595 passed** |
+| `pnpm test:db` | **117 passed**, 6 files |
+| `pnpm build` | success; 11 `/admin` routes, all `ƒ (Dynamic)` |
+| `pnpm exec playwright test e2e/admin.spec.ts` | **16 passed** (8 tests × desktop + mobile) |
+
+### What to inspect in a browser
+
+1. **`pnpm dev`, sign in, `pnpm db:promote-admin <address>`, open `/admin`.**
+2. **`/admin/evidence`** — this route returned 500 until this pass and has never
+   been looked at. Confirm the queue renders and "Open file" still mints its
+   signed URL on click.
+3. **`/admin/requests`** — likewise 500 until now. Set the threshold to 0.95 and
+   press "Regroup"; the pairs should separate.
+4. **The `report-list.tsx` comment change** — a claim about privacy-adjacent
+   behaviour was wrong in the code's favour. Confirm that showing no note on a
+   public report page is what was wanted, not just what the component happens to
+   do.
+
+### Still unverified
+
+- **No human has looked at any of it.** The suite asserts status codes, test ids
+  and one text line. It does not know whether the admin area is pleasant to use,
+  and nothing here has been checked at 390×844 by eye.
+- **The other e2e specs remain flaky under full-suite load.** With the admin
+  project isolated, `pnpm exec playwright test --project=desktop
+  --project=mobile` still fails one or two tests per run, and *which* ones moves —
+  observed in `home.spec.ts`, `sign-in.spec.ts`, `me-and-report.spec.ts` and
+  `ranking.spec.ts` across runs. This predates P10: the same spec passes in
+  isolation every time. It is dev-server latency with ten browser contexts, and
+  reducing workers to 4 did not fix it. Left as-is and recorded rather than
+  retried away, because a suite that passes on retry teaches nothing.
+- **`strongest_eligible`, `/api/revalidate`, P10b and email are unchanged** from
+  the list above.
 - **`e2e/support/admin.ts` promotes via a direct UPDATE**, which is the same one
   line `scripts/promote-admin.ts` runs. Shelling out to the script from the suite
   would put a subprocess and an env-file dependency in the path of every run to

@@ -49,11 +49,37 @@ export type EvidenceItem = {
   playbook: { id: string; slug: string; title: string };
 };
 
+/**
+ * `playbooks` is reached *through* `outcome_reports`, not from `report_evidence`.
+ *
+ * `report_evidence` has exactly one foreign key and it points at
+ * `outcome_reports`; the playbook is a second hop away. PostgREST only embeds
+ * along declared keys, so `playbooks!inner(...)` at the top level is a PGRST200
+ * ("no relationship found") and the whole page 500s — which is what happened
+ * until the browser said so. Nesting it inside `outcome_reports!inner(...)`
+ * follows the path that actually exists.
+ */
 const EVIDENCE_SELECT =
   "id, storage_path, kind, review_status, review_note, created_at, " +
   "outcome_reports!inner(id, result, amount, unit, status, is_verified, evidence_reviewed, note, " +
-  "profiles!inner(display_name)), " +
-  "playbooks!inner(id, slug, title)";
+  "profiles!inner(display_name), " +
+  "playbooks!inner(id, slug, title))";
+
+type JoinedReport = {
+  id: string;
+  result: string;
+  amount: number | null;
+  unit: string | null;
+  status: string;
+  is_verified: boolean;
+  evidence_reviewed: boolean;
+  note: string | null;
+  profiles: { display_name: string | null } | { display_name: string | null }[] | null;
+  playbooks:
+    | { id: string; slug: string; title: string }
+    | { id: string; slug: string; title: string }[]
+    | null;
+};
 
 type JoinedEvidence = {
   id: string;
@@ -62,31 +88,7 @@ type JoinedEvidence = {
   review_status: string;
   review_note: string | null;
   created_at: string;
-  outcome_reports:
-    | {
-        id: string;
-        result: string;
-        amount: number | null;
-        unit: string | null;
-        status: string;
-        is_verified: boolean;
-        evidence_reviewed: boolean;
-        note: string | null;
-        profiles: { display_name: string | null } | { display_name: string | null }[] | null;
-      }
-    | {
-        id: string;
-        result: string;
-        amount: number | null;
-        unit: string | null;
-        status: string;
-        is_verified: boolean;
-        evidence_reviewed: boolean;
-        note: string | null;
-        profiles: { display_name: string | null } | { display_name: string | null }[] | null;
-      }[]
-    | null;
-  playbooks: { id: string; slug: string; title: string } | { id: string; slug: string; title: string }[] | null;
+  outcome_reports: JoinedReport | JoinedReport[] | null;
 };
 
 function one<T>(value: T | T[] | null): T | null {
@@ -112,7 +114,7 @@ export async function listEvidence(
 
   return ((data ?? []) as unknown as JoinedEvidence[]).map((row) => {
     const report = one(row.outcome_reports);
-    const playbook = one(row.playbooks);
+    const playbook = one(report?.playbooks ?? null);
     const reporter = one(report?.profiles ?? null);
 
     return {

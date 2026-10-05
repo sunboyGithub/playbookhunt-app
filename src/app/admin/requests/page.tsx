@@ -21,9 +21,9 @@ import { requireAdmin } from "@/server/admin/session";
  * thinks the grouping is wrong can see it being wrong at a threshold they chose,
  * rather than having to take it on trust.
  *
- * The grouping itself is `admin_request_inbox` in migration 13, called through
- * `listRequestGroups`. There is no second similarity implementation to disagree
- * with it.
+ * The grouping itself is `admin_request_inbox` (migrations 13 and 14), called
+ * through `listRequestGroups`. There is no second similarity implementation to
+ * disagree with it.
  *
  * ## Why the status tabs count requests and not groups
  *
@@ -51,7 +51,7 @@ export default async function AdminRequestsPage({
     Number.isFinite(parsed) && parsed >= 0.1 && parsed <= 0.95 ? parsed : DEFAULT_SIMILARITY;
 
   const [groups, counts] = await Promise.all([
-    listRequestGroups(session.client, minSimilarity),
+    listRequestGroups(session.client, session.adminId, minSimilarity),
     countRequestsByStatus(session.client),
   ]);
 

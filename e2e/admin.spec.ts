@@ -3,7 +3,6 @@ import { expect, test } from "@playwright/test";
 import { signInOrSkip, signInWithEmailLink } from "./support/auth";
 import { adminClient } from "./support/db";
 import { deleteReport, demote, promoteToAdmin, queuePendingReport } from "./support/admin";
-import { withDbLock } from "./support/lock";
 
 /**
  * P10's acceptance criteria, end to end.
@@ -28,13 +27,21 @@ import { withDbLock } from "./support/lock";
  * dependency in the path of every run of this suite to execute one line of SQL;
  * the script itself is exercised by the documented flow in `build_history.md`.
  *
- * ## Why the database writes take the lock
+ * ## Where the database lock is taken
  *
- * `desktop` and `mobile` run concurrently in separate processes against one
- * database. Queueing a report and moderating it from both would race. Every body
- * that writes takes `withDbLock`, and every one cleans up in a `finally` — a
- * leftover admin account or sentinel report would be a state the next run
- * inherits.
+ * Inside `support/admin.ts`, not here. `desktop` and `mobile` run concurrently in
+ * separate processes against one database, so queueing a report and moderating it
+ * from both would race — and `withDbLock` is what stops them. But a spec that
+ * wraps every call site has to remember to, and one that forgets fails in a way
+ * that looks like a product bug rather than like a missing lock. Each mutating
+ * helper now takes the lock itself, around its write and not around its reads,
+ * so a test cannot get it wrong and the lock is not held across a slow
+ * `listUsers`.
+ *
+ * Every test still cleans up in a `finally`. That is best-effort, not a
+ * guarantee — Playwright abandons a test body the moment it exceeds its timeout
+ * — so `e2e/support/global-setup.ts` also demotes anything an earlier run left
+ * behind, once, before the first worker starts.
  */
 
 const SLUG = "lower-your-internet-bill";
@@ -85,9 +92,7 @@ test.describe("the promoted account", () => {
       // Still an ordinary reader at this point.
       expect((await page.goto("/admin", { waitUntil: "networkidle" }))?.status()).toBe(404);
 
-      await withDbLock(async () => {
-        expect(await promoteToAdmin(email)).toBe(true);
-      });
+      expect(await promoteToAdmin(email)).toBe(true);
 
       await page.goto("/admin", { waitUntil: "networkidle" });
 
@@ -100,17 +105,21 @@ test.describe("the promoted account", () => {
       await expect(nav.getByRole("link", { name: "Evidence" })).toBeVisible();
       await expect(nav.getByRole("link", { name: "Requests" })).toBeVisible();
     } finally {
-      await withDbLock(() => demote(email));
+      await demote(email);
     }
   });
 
   test("an admin can reach every queue the nav lists", async ({ page }) => {
+    // Eight full page loads, each one compiled on demand by the dev server.
+    // The mobile run of this same test finishes around 23s, which is inside the
+    // default but not by enough to call it reliable — and a run that times out
+    // here says nothing about whether the queues load.
+    test.slow();
+
     const email = await signInOrSkip(page, "admin");
 
     try {
-      await withDbLock(async () => {
-        expect(await promoteToAdmin(email)).toBe(true);
-      });
+      expect(await promoteToAdmin(email)).toBe(true);
 
       for (const path of [
         "/admin/reports",
@@ -127,13 +136,23 @@ test.describe("the promoted account", () => {
         await expect(page.getByTestId("admin-page")).toBeVisible();
       }
     } finally {
-      await withDbLock(() => demote(email));
+      await demote(email);
     }
   });
 });
 
 test.describe("moderation moves the public page", () => {
   test("approving shows the report and rejecting takes it away", async ({ page }) => {
+    // The one test here that does the most work: a magic-link sign-in, a
+    // promotion, a queued report, an approval, a rejection, and four full page
+    // loads to prove the public page moved each time. Against the dev server
+    // that is comfortably past Playwright's 30s default, and the failure mode
+    // when it expires is a timeout rather than a claim about moderation — which
+    // is the least useful thing this suite could report. `test.slow` triples
+    // the timeout rather than naming a number, so it stays right if the
+    // project's default ever changes.
+    test.slow();
+
     const email = await signInOrSkip(page, "admin");
 
     if (!adminClient()) {
@@ -143,29 +162,37 @@ test.describe("moderation moves the public page", () => {
     let reportId: string | null = null;
 
     try {
-      await withDbLock(async () => {
-        expect(await promoteToAdmin(email)).toBe(true);
-      });
+      expect(await promoteToAdmin(email)).toBe(true);
 
       const userId = await userIdFor(email);
-      const report = await withDbLock(() => queuePendingReport(SLUG, userId));
+      const report = await queuePendingReport(SLUG, userId);
       expect(report).not.toBeNull();
       reportId = report!.id;
 
-      // Pending: the queue shows it, and the public page does not.
+      // Pending: the queue shows it, and the public page does not count it.
       await page.goto(`/admin/reports?status=pending`, { waitUntil: "networkidle" });
-      const row = page.getByTestId("report-row").filter({ hasText: report!.note });
-      await expect(row).toHaveCount(1);
+      await expect(page.getByTestId("report-row").filter({ hasText: report!.note })).toHaveCount(1);
 
       await page.goto(`/p/${SLUG}`, { waitUntil: "networkidle" });
-      await expect(page.getByText(report!.note)).toHaveCount(0);
+      const before = await approvedCountOnPublicPage(page);
 
       // Approve it.
-      await row.getByTestId("report-approve").click();
-      await expect(row).toHaveCount(0, { timeout: 20_000 });
+      //
+      // Back to the queue first, and the row locator is rebuilt rather than
+      // held: a Playwright locator is a *query*, not a reference to an element,
+      // so one captured above is re-evaluated against whatever page the browser
+      // is on now. Clicking it after navigating to `/p/<slug>` therefore looks
+      // for the approve button on the public page, finds nothing, and waits out
+      // the whole test timeout — a failure that reads like the button is broken
+      // rather than like the test asked the wrong page.
+      await page.goto(`/admin/reports?status=pending`, { waitUntil: "networkidle" });
+      const pendingRow = page.getByTestId("report-row").filter({ hasText: report!.note });
+      await expect(pendingRow).toHaveCount(1);
+      await pendingRow.getByTestId("report-approve").click();
+      await expect(pendingRow).toHaveCount(0, { timeout: 20_000 });
 
       await page.goto(`/p/${SLUG}`, { waitUntil: "networkidle" });
-      await expect(page.getByText(report!.note)).toHaveCount(1);
+      expect(await approvedCountOnPublicPage(page)).toBe(before + 1);
 
       // Reject it, with a reason — and it goes from the public page.
       await page.goto(`/admin/reports?status=approved`, { waitUntil: "networkidle" });
@@ -179,12 +206,12 @@ test.describe("moderation moves the public page", () => {
       });
 
       await page.goto(`/p/${SLUG}`, { waitUntil: "networkidle" });
-      await expect(page.getByText(report!.note)).toHaveCount(0);
+      expect(await approvedCountOnPublicPage(page)).toBe(before);
     } finally {
       if (reportId) {
-        await withDbLock(() => deleteReport(reportId!));
+        await deleteReport(reportId!);
       }
-      await withDbLock(() => demote(email));
+      await demote(email);
     }
   });
 
@@ -198,9 +225,7 @@ test.describe("moderation moves the public page", () => {
     }
 
     try {
-      await withDbLock(async () => {
-        expect(await promoteToAdmin(email!)).toBe(true);
-      });
+      expect(await promoteToAdmin(email!)).toBe(true);
 
       await page.goto("/admin/reports", { waitUntil: "networkidle" });
 
@@ -218,10 +243,42 @@ test.describe("moderation moves the public page", () => {
       await expect(page.getByTestId("reject-reason")).toBeVisible();
       await expect(page.getByTestId("report-queue")).toBeVisible();
     } finally {
-      await withDbLock(() => demote(email!));
+      await demote(email!);
     }
   });
 });
+
+/**
+ * How many approved reports the public page says a playbook has.
+ *
+ * Read from the "Showing the N most recent of M reports" line, because that is
+ * the only thing the public page renders about this report.
+ *
+ * The obvious assertion — that the report's note appears on `/p/<slug>` — does
+ * not work, and it is worth saying why rather than leaving the next person to
+ * rediscover it. `ReportList` renders the result, the amount, the agent and the
+ * date; it never renders the note at all, anywhere outside `/admin`. So a
+ * moderation test that looked for the note was asserting that the public page
+ * quotes a stranger's free text, which it deliberately does not do, and the test
+ * failed while the product was right.
+ *
+ * The count is the honest signal for the acceptance criterion. It is computed
+ * from `public_reports`, the same view the list is read from, so a report that
+ * becomes approved and a report that becomes rejected both move it — which is
+ * precisely the claim being tested.
+ */
+async function approvedCountOnPublicPage(page: import("@playwright/test").Page): Promise<number> {
+  const line = page.getByText(/Showing the \d+ most recent of (\d+) reports?\./);
+
+  await expect(line).toBeVisible({ timeout: 20_000 });
+
+  const match = /of (\d+) reports?\./.exec(await line.innerText());
+  if (!match) {
+    throw new Error(`Could not read a report count from: ${await line.innerText()}`);
+  }
+
+  return Number(match[1]);
+}
 
 /** The profile id behind an address, for the report's `user_id`. */
 async function userIdFor(email: string): Promise<string> {

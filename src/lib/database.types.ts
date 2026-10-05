@@ -1139,7 +1139,7 @@ export type Database = {
     };
     Functions: {
       admin_request_inbox: {
-        Args: { min_similarity?: number };
+        Args: { min_similarity?: number; p_admin_id: string };
         Returns: {
           created_at: string;
           decided_at: string;

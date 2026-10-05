@@ -216,7 +216,15 @@ password_requirements = ""
 
 [auth.rate_limit]
 # Number of emails that can be sent per hour. Requires auth.email.smtp to be enabled.
-email_sent = 2
+#
+# Raised from Supabase's default of 2, and only here: this file configures the
+# local stack and is never read by a deployed project. The e2e suite follows a
+# real magic link for every test that needs a session — eight in `admin.spec.ts`
+# alone, plus whatever the other specs request — and at 2/hour GoTrue silently
+# drops the rest. The symptom is a suite where a different set of tests fails on
+# every run: the tests that got through sign in, the rest sit waiting for a
+# "check your email" screen that will never appear because no mail was sent.
+email_sent = 1000
 # Number of SMS messages that can be sent per hour. Requires auth.sms to be enabled.
 sms_sent = 30
 # Number of anonymous sign-ins that can be made per hour per IP address. Requires enable_anonymous_sign_ins = true.
@@ -224,9 +232,14 @@ anonymous_users = 30
 # Number of sessions that can be refreshed in a 5 minute interval per IP address.
 token_refresh = 150
 # Number of sign up and sign-in requests that can be made in a 5 minute interval per IP address (excludes anonymous users).
-sign_in_sign_ups = 30
+# Raised for the same reason as `email_sent`, and for a second one: these are
+# counted per IP, every test in every spec shares 127.0.0.1, and a developer
+# re-running a suite twice inside five minutes spends the window the first run
+# left behind. Re-running a failing test is the normal response to a failing
+# test.
+sign_in_sign_ups = 1000
 # Number of OTP / Magic link verifications that can be made in a 5 minute interval per IP address.
-token_verifications = 30
+token_verifications = 1000
 # Number of Web3 logins that can be made in a 5 minute interval per IP address.
 web3 = 30
 

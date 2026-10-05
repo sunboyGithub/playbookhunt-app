@@ -52,9 +52,17 @@ export type RequestGroup = RequestRow & {
 
 export async function listRequestGroups(
   client: AdminClient,
+  adminId: string,
   minSimilarity: number = DEFAULT_SIMILARITY,
 ): Promise<RequestGroup[]> {
+  // `adminId` is not decorative. The function is granted to `service_role` only,
+  // and a `service_role` key carries no user id, so the function cannot work out
+  // who is calling — it is handed the administrator's id and checks the row
+  // still says `admin`. It is the database refusing to act on a stale claim, not
+  // an authentication step: `requireAdmin()` already did that. See migration 14
+  // for why the earlier `is_admin()` guard made the function uncallable.
   const { data, error } = await client.rpc("admin_request_inbox", {
+    p_admin_id: adminId,
     min_similarity: minSimilarity,
   });
 

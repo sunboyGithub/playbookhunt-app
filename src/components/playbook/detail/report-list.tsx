@@ -15,9 +15,13 @@ import { formatTimeSpent, type ReportRow } from "@/server/queries/reports";
  *   the same reassurance.
  * - **No reporter's email or handle.** The view already substitutes a display
  *   name and an initial; nothing here reaches past them.
- * - **No note quoting.** Notes are free text from a stranger. They are shown
- *   as plain text, never as HTML, and they are not treated as evidence of
- *   anything.
+ * - **No notes at all.** Not quoted, not truncated, not rendered. A note is
+ *   free text typed by a stranger, it is the one field with no length or content
+ *   limit on it, and it is the one field a reader cannot act on — the result,
+ *   the amount and the date are what the list is for. Notes are read in `/admin`
+ *   and written nowhere public. This was previously documented as "shown as
+ *   plain text, never as HTML", which described an intention the component has
+ *   never implemented; the code is the honest version.
  */
 export function ReportList({
   reports,

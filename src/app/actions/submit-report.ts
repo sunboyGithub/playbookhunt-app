@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { refreshAfterReportChange } from "@/lib/ranking/refresh-after";
 import { reportSchema, REPORTS_PER_DAY } from "@/lib/report/schema";
 import {
   AMOUNT_CAPS,
@@ -244,11 +245,20 @@ export async function submitReport(input: unknown): Promise<SubmitReportResult> 
     .eq("playbook_id", playbook.id)
     .is("completed_at", null);
 
-  // P9 writes the aggregate rows. Until that job exists there is nothing to
-  // recompute here, so this revalidation refreshes the parts of the page that
-  // do read the report — the list of reports from others, and the count of
-  // reports — and the evidence tiles stay at whatever the last job wrote. That
-  // gap is P9's, and it is called out rather than papered over.
+  // The evidence tiles on the card and the detail page read `playbook_stats`,
+  // and a freshly filed report moves every one of them. Recomputing here is what
+  // makes the page agree with itself the moment the reader lands on it, rather
+  // than up to a cron interval later.
+  //
+  // Awaited, and deliberately before the revalidation. A refresh that is still
+  // in flight when `revalidatePath` runs would re-render the page against the
+  // *old* stats row and the cache would then hold that stale render for its
+  // whole window — the revalidate would have made the staleness permanent
+  // instead of clearing it. This is the opposite of the try-event case in
+  // `try-copy`, where fire-and-forget is correct because the user is already
+  // gone; here the user is waiting for a page about this report.
+  await refreshAfterReportChange(playbook.id);
+
   revalidatePath(`/p/${playbook.slug}`);
   revalidatePath("/p/[slug]", "page");
   revalidatePath("/me");

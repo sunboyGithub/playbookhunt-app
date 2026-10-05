@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { refreshAfterReportChange } from "@/lib/ranking/refresh-after";
 import { reportSchema } from "@/lib/report/schema";
 import {
   AMOUNT_CAPS,
@@ -170,6 +171,12 @@ export async function editReport(input: {
     return { ok: false, error: "That change didn't save. Try again in a moment." };
   }
 
+  // An edit can move an amount across the median, or a result from "worked" to
+  // "didn't", and either one changes every tile on the card. Awaited before the
+  // revalidation for the same reason as in `submitReport`: a refresh still in
+  // flight would revalidate the page against the old row and cache *that*.
+  await refreshAfterReportChange(playbook.id);
+
   revalidatePath(`/p/${playbook.slug}`);
   revalidatePath("/p/[slug]", "page");
   revalidatePath("/me");
@@ -246,6 +253,11 @@ export async function deleteReport(input: {
     .maybeSingle();
 
   const slug = playbook?.slug as string | undefined;
+
+  // A withdrawn report leaves a hole in the numbers, and the hole is the point:
+  // the stats row has to stop counting it. Same ordering rule as the two calls
+  // above — refreshed before, not after, the revalidation.
+  await refreshAfterReportChange(existing.playbook_id);
 
   if (slug) {
     revalidatePath(`/p/${slug}`);

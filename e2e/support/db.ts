@@ -9,7 +9,10 @@
  *   percentage is withheld, but not that withholding it was correct unless it can
  *   read how many reports actually exist.
  *
- * Service role, and read-only by usage. Nothing here writes.
+ * Service role, and read-only by usage — with one deliberate exception. Almost
+ * nothing here writes: the one function that does is marked `mutating`, and it
+ * exists because P9's acceptance criterion is about the *order* search results
+ * come back in, which cannot be asserted without moving a number.
  */
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
@@ -155,4 +158,129 @@ export async function authUserId(email: string): Promise<string | null> {
 
   const { data } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
   return data.users.find((user) => user.email === email)?.id ?? null;
+}
+/* -------------------------------------------------------------------------- */
+/* The one write                                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What `pinEvidenceScores` changed, so it can be undone exactly.
+ *
+ * Two lists rather than one map of nullable scores, because "the score was null"
+ * and "there was no row" need different undos: one is an update, the other is a
+ * delete.
+ */
+export type PinnedScores = {
+  /** Slugs whose existing score has to be written back. */
+  scores: Record<string, number>;
+  /** Slugs that had no stats row, so the row this helper made must be removed. */
+  rowsCreated: string[];
+};
+
+/** Slug ↔ id, resolved once and cached; the catalogue does not change mid-run. */
+const slugCache = new Map<string, string>();
+
+async function playbookIdFor(slug: string): Promise<string> {
+  const supabase = adminClient();
+  if (!supabase) return "";
+
+  const cached = slugCache.get(slug);
+  if (cached) return cached;
+
+  const { data, error } = await supabase
+    .from("playbooks")
+    .select("id")
+    .eq("slug", slug)
+    .maybeSingle();
+
+  if (error) throw new Error(`looking up ${slug}: ${error.message}`);
+
+  // A slug that resolved to nothing would go into the write as `undefined`,
+  // which PostgREST rejects with a confusing complaint about a uuid.
+  if (!data) throw new Error(`no playbook with slug ${slug} — run pnpm content:import`);
+
+  slugCache.set(slug, String(data.id));
+  return String(data.id);
+}
+
+/**
+ * **Mutating.** Read current scores, then pin them to the given values.
+ *
+ * The only way to assert "results are ordered by evidence score" is to have two
+ * playbooks whose scores are in a known order and check which comes first — and
+ * both seeded playbooks have real reports, so their scores come out of
+ * `aggregate()` in whatever order the arithmetic produces. Pinning them makes
+ * the expectation explicit and independent of that.
+ *
+ * Pinned to values no aggregation would produce (0.9 and 0.1, not two near
+ * neighbours), so a failure cannot be explained by the rules having shifted
+ * slightly. Hand the return value to `restoreEvidenceScores` in a `finally`:
+ * leaving a developer's database with a fabricated ranking is worse than a
+ * failed test, and it is exactly the state the seed script used to be able to
+ * leave behind.
+ */
+export async function pinEvidenceScores(pinned: Record<string, number>): Promise<PinnedScores> {
+  const supabase = adminClient();
+  if (!supabase) return { scores: {}, rowsCreated: [] };
+
+  const slugs = Object.keys(pinned);
+  const ids = await Promise.all(slugs.map(playbookIdFor));
+
+  const { data, error: readError } = await supabase
+    .from("playbook_stats")
+    .select("playbook_id, evidence_score")
+    .in("playbook_id", ids);
+
+  if (readError) throw new Error(`reading stats for ${slugs.join(", ")}: ${readError.message}`);
+
+  const scoreById = new Map<string, number>(
+    (data ?? []).map((row) => [String(row.playbook_id), Number(row.evidence_score)]),
+  );
+
+  // What `previous` records is not "the old score" but "what to do to get back".
+  // A playbook whose stats row did not exist needs its row deleted, not zeroed:
+  // a zeroed row is something the aggregation job would have written, and
+  // leaving one behind invents a fact about a playbook that has no reports.
+  const previous: PinnedScores = { scores: {}, rowsCreated: [] };
+
+  slugs.forEach((slug, index) => {
+    const score = scoreById.get(ids[index]!);
+    if (score === undefined) previous.rowsCreated.push(slug);
+    else previous.scores[slug] = score;
+  });
+
+  const { error: writeError } = await supabase
+    .from("playbook_stats")
+    .upsert(
+      slugs.map((slug, index) => ({ playbook_id: ids[index]!, evidence_score: pinned[slug]! })),
+      { onConflict: "playbook_id" },
+    );
+
+  if (writeError) throw new Error(`pinning evidence scores: ${writeError.message}`);
+
+  return previous;
+}
+
+/** Undo `pinEvidenceScores`, from the value it returned. */
+export async function restoreEvidenceScores(previous: PinnedScores): Promise<void> {
+  const supabase = adminClient();
+  if (!supabase) return;
+
+  for (const [slug, score] of Object.entries(previous.scores)) {
+    const { error } = await supabase
+      .from("playbook_stats")
+      .update({ evidence_score: score })
+      .eq("playbook_id", await playbookIdFor(slug));
+
+    if (error) throw new Error(`restoring the score for ${slug}: ${error.message}`);
+  }
+
+  for (const slug of previous.rowsCreated) {
+    const { error } = await supabase
+      .from("playbook_stats")
+      .delete()
+      .eq("playbook_id", await playbookIdFor(slug));
+
+    if (error) throw new Error(`removing the invented stats row for ${slug}: ${error.message}`);
+  }
 }

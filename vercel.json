@@ -4,6 +4,10 @@
     {
       "path": "/api/cron/followups",
       "schedule": "17 * * * *"
+    },
+    {
+      "path": "/api/cron/stats",
+      "schedule": "*/15 * * * *"
     }
   ]
 }

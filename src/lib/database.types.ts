@@ -508,7 +508,9 @@ export type Database = {
       playbook_stats: {
         Row: {
           amount_n: number;
+          badges: string[];
           didnt: number;
+          evidence_approved: number;
           evidence_score: number;
           last_report_at: string | null;
           last30_success: number | null;
@@ -518,16 +520,22 @@ export type Database = {
           partly: number;
           playbook_id: string;
           report_count: number;
+          show_median: boolean;
+          show_rate: boolean;
+          strongest_eligible: boolean;
           success_rate_raw: number | null;
           trending_score: number;
           tried_count: number;
           updated_at: string;
+          weighted_success: number | null;
           wilson_lb: number | null;
           worked: number;
         };
         Insert: {
           amount_n?: number;
+          badges?: string[];
           didnt?: number;
+          evidence_approved?: number;
           evidence_score?: number;
           last_report_at?: string | null;
           last30_success?: number | null;
@@ -537,16 +545,22 @@ export type Database = {
           partly?: number;
           playbook_id: string;
           report_count?: number;
+          show_median?: boolean;
+          show_rate?: boolean;
+          strongest_eligible?: boolean;
           success_rate_raw?: number | null;
           trending_score?: number;
           tried_count?: number;
           updated_at?: string;
+          weighted_success?: number | null;
           wilson_lb?: number | null;
           worked?: number;
         };
         Update: {
           amount_n?: number;
+          badges?: string[];
           didnt?: number;
+          evidence_approved?: number;
           evidence_score?: number;
           last_report_at?: string | null;
           last30_success?: number | null;
@@ -556,10 +570,14 @@ export type Database = {
           partly?: number;
           playbook_id?: string;
           report_count?: number;
+          show_median?: boolean;
+          show_rate?: boolean;
+          strongest_eligible?: boolean;
           success_rate_raw?: number | null;
           trending_score?: number;
           tried_count?: number;
           updated_at?: string;
+          weighted_success?: number | null;
           wilson_lb?: number | null;
           worked?: number;
         };
@@ -745,6 +763,7 @@ export type Database = {
           avatar_url: string | null;
           created_at: string;
           display_name: string | null;
+          email_verified: boolean;
           handle: string | null;
           id: string;
           reminders_enabled: boolean;
@@ -754,6 +773,7 @@ export type Database = {
           avatar_url?: string | null;
           created_at?: string;
           display_name?: string | null;
+          email_verified?: boolean;
           handle?: string | null;
           id: string;
           reminders_enabled?: boolean;
@@ -763,6 +783,7 @@ export type Database = {
           avatar_url?: string | null;
           created_at?: string;
           display_name?: string | null;
+          email_verified?: boolean;
           handle?: string | null;
           id?: string;
           reminders_enabled?: boolean;

@@ -1354,3 +1354,188 @@ tried it, and so is not nudged to report. That is a trade, not an oversight.
 - **The privacy test proves the two actions this milestone calls take no field
   values.** It cannot prove a future third action would not; nothing structural
   stops someone adding a parameter.
+
+---
+
+## P9 — Ranking and aggregation
+
+### What was built
+
+The scoring layer, from the constant that defines it to the query that reads it.
+
+**The pure module** — [src/config/ranking.ts](src/config/ranking.ts) holds every
+number the ranking rules depend on, so there is one place to change a weight and
+one place to see what they are. [src/lib/ranking/](src/lib/ranking/) is everything
+downstream of it:
+
+| File | What it decides |
+|---|---|
+| `weight.ts` | Trust multiplier per report: 1.0 verified, 0.5 unverified, 1.5 with approved evidence, 0 for rejected / outlier / the author's own. Plus the 60-day decay. |
+| `wilson.ts` | The lower bound of a weighted success rate. `n = 0` → 0, never NaN. |
+| `outcome.ts` | Percentile of a playbook's median against its category. Monthly is annualised so `$40/mo` and `$480/yr` are the same claim; hours are never compared to dollars. |
+| `usage.ts` | Logarithmic share of the busiest playbook on the site. |
+| `trending.ts` | 7-day window, 48-hour half-life, tries weighted 1 and reports 3. |
+| `outliers.ts` | R type-7 quantiles, Tukey's IQR fence at ≥10 amounts, and the cap rule at any n. |
+| `aggregate.ts` | The two passes. Absolute terms first, then the peer-relative half. |
+| `refresh.ts` | The only place that knows how a column in `outcome_reports` becomes a number in `playbook_stats`. |
+
+`evidence_score = 0.55·wilson + 0.20·outcome + 0.15·recency + 0.10·usage`.
+
+**The schema** — [20240101000011_stats_flags.sql](supabase/migrations/20240101000011_stats_flags.sql)
+adds `weighted_success`, `evidence_approved`, `show_rate`, `show_median`,
+`strongest_eligible` and `badges` to `playbook_stats`, plus `profiles.email_verified`
+maintained by a trigger on `auth.users`. Three check constraints make the
+withholding structural: a `show_rate` below 20 reports, a `show_median` below 10
+amounts, or an unrecognised badge name are refused by the database rather than
+by a comment.
+
+**The job** — `refreshStats(supabase, playbookId?)` writes one row or the whole
+catalogue. It is called from `submitReport`, `editReport` and `deleteReport`
+(awaited, before the revalidation), and from `/api/cron/stats` on a 15-minute
+schedule.
+
+### Two bugs found by making the fixtures real
+
+**The 1000-row cap.** PostgREST truncates a response at 1000 rows, silently — no
+error. The seed asked for 1,180 devices and `tried_count` came back as exactly
+1,000, with the two quieter playbooks at 0 because their rows sat past the cut.
+A ranking job that quietly loses its busiest rows is the worst version of this
+bug: the page renders "1,000 people tried this" and nothing anywhere is red. All
+three bulk reads now page at 1,000 with a stable `order by id`; a stable order
+matters because two pages of an unordered query can overlap or skip at the
+boundary, which shows up as a median that wobbles between runs of the same data.
+`readReporters` was the same hazard with worse consequences — every reporter past
+the cut would be unknown, and an unknown reporter means no trust weight, so a
+popular playbook would quietly lose trust it had earned.
+
+**The seed was fabricating the ranking.** `scripts/seed-fixture-stats.ts` wrote
+`playbook_stats` rows directly, with `evidence_score` invented as
+`reportCount × rate × 10` — a plausible-looking number in the one column the
+entire search order depends on, produced by arithmetic that appears nowhere else
+in the codebase. It now calls the real job. The knock-on was that
+`fixture.triedCount` had become dead (it was only ever written into the
+fabricated row), so the seed now writes real `try_events` — one device each for
+`started`, plus a slice of dated `copied` events, because trending is computed
+from copies and seeding only starts would leave the trending sort untestable.
+
+### A source-of-truth disagreement
+
+`evidence_approved` was reading `report_evidence.review_status = 'approved'`.
+Migration 06 added `outcome_reports.evidence_reviewed` for exactly this purpose,
+and the moderation flow writes that column. So the two can disagree, and the
+disagreement is invisible: a report whose evidence was approved would show the
+"Evidence reviewed" tag from the column while contributing nothing to the count,
+so "Proven to work" would demand three that the page insists exist. Ranking now
+reads the column.
+
+### A test that was passing for the wrong reason
+
+The first version of the e2e criterion asserted only "the higher-scored playbook
+comes first". That passes against a page that lists playbooks in slug order, or
+in whatever order the database returned them — neither of which has ever heard
+of `evidence_score`. There is now a second test that pins the scores the other
+way round and asserts the reverse order, and a third that pins both ways under
+`?sort=most_tried` and asserts the order does not move.
+
+Pinning scores in a database means two projects writing the same rows, and
+Playwright runs `desktop` and `mobile` concurrently in separate processes.
+`mode: "serial"` only orders tests inside one worker. [e2e/support/lock.ts](e2e/support/lock.ts)
+is a cross-process `mkdir` lock with stale reclamation; that is not flakiness to
+retry, it is a test that could not pass and could not be made to.
+
+### Checks and results
+
+| Check | Result |
+|---|---|
+| `pnpm lint` | clean |
+| `pnpm typecheck` | clean |
+| `pnpm test` (vitest) | **500 passed**, 0 failed |
+| `pnpm test:db` (pgTAP) | **92 passed** across 5 files (23 new in `005_p9_stats_flags.sql`) |
+| `pnpm build` | success — 27 routes, `/api/cron/stats` registered, Proxy present |
+| `pnpm exec playwright test` | **124 passed / 8 skipped** (6 new) |
+
+The 8 skips are the `E2E_TARGET=prod`-only navigation-regression spec, unchanged
+from P8.
+
+### What to inspect in the browser
+
+1. **`/playbooks`** — the order should be *Find cheaper car insurance* (score
+   0.516), *Plan seven days in Japan* (0.442), *Lower your internet bill*
+   (0.338). Check the evidence line on each.
+2. **`/p/cheaper-car-insurance`** — 68% worked, `n = 40`; median $310/yr over
+   20 amounts; "Proven to work" absent, because only 1 report has evidence
+   approved and the rule needs 3.
+3. **`/p/lower-your-internet-bill`** — "Early · 7 reports", no percentage, no
+   median tile. The withholding working is the thing to look at.
+4. **Badge chips** — the Japan card should carry *Most tried* and *Top saver*;
+   the internet bill *Most tried* only.
+5. **Filters → sort → `?sort=most_tried` then `?sort=highest_outcome`** — the
+   order must change between them, and must *not* change when you go back to
+   `best_evidence` and re-fetch.
+6. **File a report** on any playbook, then reload the card. The evidence line
+   and the tiles must already reflect it — the refresh is awaited before the
+   revalidation, not left to the cron.
+7. **Withdraw that report** (`/me` → Reported → delete). The numbers must go
+   back, not linger.
+8. **`curl -i localhost:3000/api/cron/stats`** with no header → 401. With
+   `-H "Authorization: Bearer $CRON_SECRET"` from `.env.local` → 200 and a JSON
+   body with `refreshed`, `changed` and `durationMs`.
+9. **`pnpm db:seed-stats` twice in a row** — the second run must report the same
+   tried counts, not doubled ones.
+
+### Deliberate deviations, stated
+
+- **`outcomeStrength` needs 3 comparable peers, not 1.** The brief says the
+  percentile is 0.5 "if not computable". With one peer a percentile is 0, 0.5 or
+  1, so the entire 0.20 outcome term would be decided by one other playbook's
+  median. `MIN_OUTCOME_PEERS` is the documented departure.
+- **An outlier's whole report is excluded, not just its amount.** There is a
+  real argument the other way — the flag is a claim about the number, not about
+  whether it worked. The brief says "author's own reports and outliers do not
+  change stats", and a report that changes `report_count` changes a stat. The
+  argument is recorded in `aggregate.ts` rather than acted on.
+- **Badges are display-only and structurally so.** `search_playbooks_ranked`
+  orders by text rank and nothing in it reads `evidence_score`; there is no code
+  path from a badge to an `order by`, so AGENTS.md's rule cannot be violated by a
+  later edit either. `badges`, `strongest_eligible` and `evidence_approved` are
+  written by the job and read only by the card.
+- **`refreshStats` takes a client rather than creating one.** `server-only`
+  *throws* under plain Node, so a marked module is uncallable from the seed
+  script — and a seed script that cannot call the real aggregation goes back to
+  inventing `playbook_stats` rows, which is the bug above. The server boundary
+  is now `refresh-after.ts`, which is the only thing that builds a service-role
+  client.
+- **The refresh is awaited in all three report actions, deliberately the
+  opposite of the try-event case in P8.** There, fire-and-forget is right: the
+  user has already taken their prompt and is gone. Here the user is waiting for
+  a page about this report, and a refresh still in flight when `revalidatePath`
+  runs would re-render against the *old* row and cache that render for its whole
+  window.
+- **`reportWeight` takes no `now`.** Trust is a property of a report and its
+  author at the moment it was filed; the new-account rule measures account age
+  against filing date. The parameter existed and was unused, and "for symmetry"
+  with `weightedReport` is exactly how a two-year-old account gets treated as new.
+
+### Blocks and unverified criteria
+
+- **`/api/revalidate` is still unauthenticated.** Still deferred; nothing in P9
+  calls it — the cron returns a `changed` slug list for a caller to use, and no
+  such caller exists yet.
+- **`strongest_eligible` is computed but nothing renders it.** The "Proven to
+  work" row needs 20 reports *and* 3 evidence-approved; no fixture reaches it,
+  and no seed creates `report_evidence` rows, so the one thing that would
+  demonstrate it is not demonstrable yet. That is a P10/P11 gap, not a P9 one.
+- **Evidence moderation does not exist.** `report_evidence.review_status` is
+  never written to `approved` by anything in the codebase — there is no admin UI.
+  `evidence_reviewed` is only ever set by the seed. The aggregation is correct
+  against the column; nothing yet moves the column.
+- **The trending numbers have only been observed from seeded data.** Copies are
+  written by the seed with timestamps spread over 40 hours, which exercises the
+  decay but is not a real traffic distribution.
+- **Email delivery has still never sent a message**, and this is now **owed a
+  decision twice**: `pnpm add resend @react-email/components @react-email/render`
+  was refused again during P9. The owner has since answered "install the three
+  packages"; the install itself is still blocked on the tool side and needs to be
+  run by hand.
+- **The cron has never run on a real scheduler.** It runs locally and refuses
+  without `CRON_SECRET`. The `changed` list has never been consumed by anything.

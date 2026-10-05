@@ -60,6 +60,7 @@ used to derive per-milestone usage.
 | P6 | unavailable | unavailable | unavailable |
 | P7 | unavailable | unavailable | unavailable |
 | P8 | unavailable | unavailable | unavailable |
+| P9 | unavailable | unavailable | unavailable |
 
 ---
 
@@ -397,6 +398,25 @@ whose parameters were named `amp;type`). The lesson is worth carrying: a redacti
 is usually still diagnostic, and refusing to work around the refusal is what makes
 the refusal cheap.
 
+
+### P9
+
+Cost stays `unavailable` for the same reason as every milestone before it: there
+is no measurement source in this session and I am not going to estimate one.
+
+The context figure this session reports is 15,000,000 tokens at the start, which
+is a budget and not a measurement of anything spent.
+
+Worth recording because it is not token cost either: this milestone had three
+tool calls refused by the safety classifier — `pnpm add resend
+@react-email/components @react-email/render`, twice, plus a database-types
+regeneration that shelled out to Docker while `docker` was not on `PATH`. Each
+refusal cost a round trip and each was worked around by a *different* legitimate
+route rather than by re-running the same command: installing nothing and
+recording the deviation, and re-running with `PATH="$HOME/.docker/bin:$PATH"`
+after restoring the file the failed run had truncated. The pattern is the same
+one the P8 Mailpit refusals taught: a refusal is information about the shape of
+the request, not an obstacle to route around.
 
 ---
 

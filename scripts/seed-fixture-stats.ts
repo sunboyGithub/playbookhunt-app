@@ -29,6 +29,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "../src/lib/database.types";
+import { refreshStats } from "../src/lib/ranking/refresh";
 import { REPORT_THRESHOLD } from "../src/server/queries/types";
 
 /**
@@ -65,6 +66,15 @@ const FIXTURES: {
   didnt: number;
   amount: number;
   amountEvery: number;
+  /**
+   * Distinct devices to write a `started` try event for.
+   *
+   * Was previously written straight into the fabricated `playbook_stats` row.
+   * Now that the stats come from `try_events`, it has to be *counted* rather
+   * than declared — and `tried_count` is a count of distinct devices, so this
+   * seeds exactly that many devices, one event each. A device that started twice
+   * would be one person, and would silently understate the popularity term.
+   */
   triedCount: number;
 }[] = [
   {
@@ -224,36 +234,63 @@ async function main() {
       throw new Error(`inserting fixtures for ${fixture.slug}: ${insertError.message}`);
     }
 
-    const amountN = reports.filter((report) => report.amount !== null || report.hours_saved !== null)
-      .length;
-
-    const { error: statsError } = await supabase.from("playbook_stats").upsert({
-      playbook_id: playbook.id,
-      tried_count: fixture.triedCount,
-      report_count: fixture.reportCount,
-      worked: fixture.worked,
-      partly: fixture.partly,
-      didnt: fixture.didnt,
-      success_rate_raw: fixture.worked / fixture.reportCount,
-      median_amount: fixture.amount,
-      p25: Math.round(fixture.amount * 0.7),
-      p75: Math.round(fixture.amount * 1.4),
-      amount_n: amountN,
-      last30_success: fixture.worked / fixture.reportCount,
-      // Weighted evidence, so the related-playbooks ordering has something to
-      // sort on rather than three equal scores.
-      evidence_score: fixture.reportCount * (fixture.worked / fixture.reportCount) * 10,
-      trending_score: 0,
-      last_report_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    });
-
-    if (statsError) {
-      throw new Error(`writing stats for ${fixture.slug}: ${statsError.message}`);
+    // Try events, written as rows rather than as a number, because `tried_count`
+    // is now derived from them. `copied` as well as `started`, because trending
+    // is computed from copies — seeding only starts would leave the trending
+    // column at zero and the "Trending" sort untestable.
+    //
+    // Device ids are namespaced by slug and index so a rerun replaces rather
+    // than accumulates, and so this playbook's devices are not shared with
+    // another's — a shared device would make two playbooks share one person in
+    // the site's "people tried this" count.
+    const staleTries = await supabase
+      .from("try_events")
+      .select("id")
+      .eq("playbook_id", playbook.id);
+    const staleTryIds = (staleTries.data ?? []).map((row) => row.id);
+    if (staleTryIds.length > 0) {
+      await supabase.from("try_events").delete().in("id", staleTryIds);
     }
 
+    const tryEvents = Array.from({ length: fixture.triedCount }, (_, index) => ({
+      playbook_id: playbook.id,
+      version_id: versionId,
+      user_id: null,
+      device_id: `fixture-${fixture.slug}-${index}`,
+      action: "started",
+      created_at: new Date(Date.now() - ((index % 72) + 1) * 60 * 60 * 1000).toISOString(),
+    }));
+
+    const { error: tryError } = await supabase.from("try_events").insert(tryEvents);
+    if (tryError) {
+      throw new Error(`inserting try events for ${fixture.slug}: ${tryError.message}`);
+    }
+
+    // A slice of the copies, dated inside the trending window, so the trending
+    // sort has a real distribution to order rather than a single score.
+    const copies = Array.from({ length: Math.round(fixture.triedCount / 40) }, (_, index) => ({
+      playbook_id: playbook.id,
+      version_id: versionId,
+      user_id: null,
+      device_id: `fixture-${fixture.slug}-copy-${index}`,
+      action: "copied",
+      created_at: new Date(Date.now() - (index % 40) * 60 * 60 * 1000).toISOString(),
+    }));
+
+    if (copies.length > 0) {
+      const { error: copyError } = await supabase.from("try_events").insert(copies);
+      if (copyError) {
+        throw new Error(`inserting copies for ${fixture.slug}: ${copyError.message}`);
+      }
+    }
+
+    const amountN = reports.filter(
+      (report) => report.amount !== null || report.hours_saved !== null,
+    ).length;
+
     console.log(
-      `  ${fixture.slug}: ${fixture.reportCount} reports, ${amountN} with amounts, ` +
+      `  ${fixture.slug}: ${reports.length} reports, ${amountN} with amounts, ` +
+        `${fixture.triedCount} devices tried it, ` +
         // The same threshold the page uses, not a fraction of the worked count.
         // An earlier version tested `worked / reportCount >= 0.2` and printed
         // "rate shows" for a playbook with 7 reports — a log line contradicting
@@ -261,6 +298,27 @@ async function main() {
         `${fixture.reportCount >= REPORT_THRESHOLD ? "rate shows" : "Early state"}`,
     );
   }
+
+  // Every fixture's reports are in by now, so the aggregates are computed by the
+  // same code that runs in production rather than written here.
+  //
+  // This block used to `upsert` a hand-written `playbook_stats` row per fixture,
+  // with an `evidence_score` invented as `reportCount × rate × 10` so the
+  // related-playbooks ordering had something to sort on. That is exactly the
+  // thing P9 exists to prevent: a plausible-looking number in the one column
+  // the whole search order depends on, produced by arithmetic that appears
+  // nowhere else in the codebase. If the ranking rules change, those rows keep
+  // their old shape and the fixtures quietly become evidence about the previous
+  // rules. Calling `refreshStats` means the fixtures are ranked by the rules.
+  //
+  // The client is passed in rather than created here, which is why
+  // `refreshStats` lives outside the `server-only` boundary — see its header.
+  const { refreshed, changed, created } = await refreshStats(supabase);
+
+  console.log(
+    `\nAggregated ${refreshed} playbooks through the real ranking job ` +
+      `(${created.length} new, ${changed.length} whose score moved).`,
+  );
 
   console.log("\nFixtures written. `pnpm db:reset` removes them.");
 }

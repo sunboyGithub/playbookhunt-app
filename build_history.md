@@ -2067,7 +2067,8 @@ pass for the wrong reason, so a longer window makes those stricter.
   229 local users that is one round trip, but it is called inside `toPass` retry
   loops and will silently start returning `null` once the local database passes
   1000 accounts, which repeated runs are heading towards. **That is the next thing
-  to fix in the suite, and it is not fixed here.**
+  to fix in the suite, and it is not fixed here** — the harness follow-up entry
+  below takes the retry-loop half of it, and leaves the page-1 limit open.
 - **8 e2e tests are skipped by design** — the four `navigation.spec.ts`
   "keeps the current page visible" tests per viewport, which measure mid-flight
   rendering and are meaningless against a dev server that compiles on demand. They
@@ -2076,3 +2077,90 @@ pass for the wrong reason, so a longer window makes those stricter.
 - **`/api/revalidate` is still unauthenticated**, as at P9.
 - **Email has still never sent a message.** `resend`, `@react-email/components`
   and `@react-email/render` are installed and unused; that is P11.
+
+---
+
+## Harness follow-up — the retry-loop load, and a toast that matched the wrong element
+
+**Status:** complete. Commit `f56b915`, branch `main`, 2 files. Pushed.
+
+Two fixes to `e2e/`, both items P10b named and left open. Neither touches `src/`
+or `supabase/`; this is a test-infrastructure commit.
+
+### `authUserId` re-paged the whole user table inside every retry
+
+`e2e/support/db.ts:authUserId` resolves an address to its `auth.users` id by
+listing users at 1000 per page and reading page 1. Its docstring has carried the
+page-1 limit since P9: past 1000 accounts a freshly created address falls off the
+end and resolves to `null`, which `copiedActionsFor` turns into an empty array, so
+a test fails as "nothing was logged" when the copy *was* logged.
+
+That limit is still there. What this commit fixes is the *cost* of the call, which
+is what the flakiness actually came from. `copiedActionsFor` is called from inside
+`toPass` retry loops, so before this every retry of "wait for the copy to be
+logged" transferred the entire user table again — the mechanism the function's own
+comment names as the suite's largest source of load under five workers against one
+Postgres. It surfaced as those loops timing out, which in the failure output is
+indistinguishable from a product bug.
+
+The fix is a per-process `Map` of address → id. An id never changes, so once a
+worker has resolved an address it never has to again. A miss still re-fetches, so
+an account created after the first call is still found: nothing is cached
+negatively, and the cache cannot go stale in the direction that matters.
+
+The page-1 limit is left as a *stated* limit rather than implied to be fixed, and
+the comment now says so. A cache that quietly hides a truncation bug would be
+worse than the truncation bug.
+
+### The "Reminders off" assertion was reading the previous toast
+
+`e2e/me-and-report.spec.ts` asserted the reminders toast with
+`page.locator("[data-sonner-toast]").first()`. Sonner stacks toasts rather than
+replacing them, and the delete earlier in the same test still had its "Report
+deleted." toast mounted, so `.first()` was resolving to *that* one. The assertion
+was reading the previous toast's text — a test that is not a test of anything, and
+one that under load could pass for the wrong reason as easily as it could fail. It
+now matches by text.
+
+This is the P8 and P9 pattern at its smallest: an assertion that is green against
+the state it meant to check and was never exercised against a second toast.
+
+### Checks
+
+| Check | Result |
+| --- | --- |
+| `pnpm typecheck` | Clean |
+| `pnpm exec eslint src e2e scripts` | Clean (exit 0, no output) |
+| `pnpm lint` | **Fails, and not on source.** See below. |
+| e2e suite | **Not re-run** — see below |
+| `git status` after commit | Clean |
+
+### `pnpm lint` now fails on a generated directory, not on the code
+
+The bare `pnpm lint` run reports 3054 problems — 259 errors, 2795 warnings — and
+every one of them is in `playwright-report/trace/`, the Playwright HTML report's
+own bundled JavaScript. `eslint.config.mjs` extends the Next.js config and adds
+`globalIgnores` for `.next/**`, `out/**`, `build/**` and `next-env.d.ts`, but not
+for `playwright-report/**` or `test-results/**`. Those two are gitignored, so
+nothing generated has ever been committed; the failure only appears once a run has
+written a report into the working tree, which is why the P10b record shows a clean
+`pnpm lint` and this one does not.
+
+`pnpm exec eslint src e2e scripts` is clean, so no source file is implicated. The
+fix is two more entries in `globalIgnores`; it is left undone here because that is
+a config change, and this commit is the test fix rather than the lint config.
+
+### Still unverified
+
+- **The e2e suite was not re-run against these two changes.** They are harness
+  fixes and the diff is small, but the load they target is only visible under a
+  full five-worker run against the local stack, and no such run is recorded here.
+  "This reduces the load" is the code's reasoning, not a measured before and after.
+- **The page-1 truncation is still unfixed.** Past 1000 local accounts
+  `authUserId` returns `null` for a real address. The fix is to resolve users by id
+  — the sign-in helpers already have it — or to prune the table between runs. The
+  cache does not address it and is not meant to.
+- **The flakiness recorded by P10 and P10b is not claimed fixed.** This removes one
+  source of load; whether the remaining failures go with it has not been measured.
+- **`pnpm lint` still fails in any working tree that holds a Playwright report.**
+  See above.

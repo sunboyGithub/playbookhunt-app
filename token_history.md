@@ -583,4 +583,38 @@ of a 1000-row `auth.users` page and will start returning `null` for real test
 accounts once the local database crosses 1000 users. It is at 229. Fixing it
 means changing how every test resolves an address, which is P9-era test
 infrastructure and not this milestone's work — so it is documented as the next
-thing rather than half-done here.
+thing rather than half-done here. The harness follow-up below takes the
+retry-loop half of it; the page-1 limit is still open.
+
+---
+
+## Harness follow-up — `authUserId` and the toast
+
+Commit `f56b915`. Token cost: **`unavailable`**, as for every milestone in this
+file. No measurement source exists for this session, and no estimate is
+substituted for one.
+
+### What this cost, in the only currency I can report honestly
+
+One short session: two files, both under `e2e/`, both fixing something an earlier
+entry had already named. No product code, no new tests, and no run of the e2e
+suite.
+
+**The cheapest useful thing was reading the two files before touching them.** The
+`authUserId` limit was already written down in its own docstring and in
+[build_history.md](build_history.md), so there was no diagnosis to do — only a
+choice about which half of the problem to take. The cache takes the retry-loop
+cost and deliberately leaves the page-1 truncation, because that half means
+changing how every test resolves an address and the cache does not touch it.
+
+**What was not done: run the e2e suite.** It is the only thing that could show
+whether the load actually fell, and it was not run. That is recorded in
+[build_history.md](build_history.md) as an unverified claim rather than implied by
+a green check.
+
+**A cost that is not this commit's to bill.** `pnpm lint` fails on this working
+tree — 3054 problems, every one of them in `playwright-report/trace/`, generated
+and gitignored, and not covered by `eslint.config.mjs`'s `globalIgnores`. Nothing
+was spent fixing it; it is noted because a bare `pnpm lint` will keep failing for
+anyone whose last run left a report behind, which makes "lint clean" a check that
+quietly stopped meaning what the earlier entries say it means.

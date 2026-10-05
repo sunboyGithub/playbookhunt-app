@@ -18,7 +18,8 @@
     "db:types": "supabase gen types typescript --local > src/lib/database.types.ts",
     "content:import": "node --env-file=.env.local --import tsx --conditions react-server scripts/import-content.ts",
     "content:validate": "tsx scripts/validate-content.ts",
-    "db:seed-stats": "node --env-file=.env.local --import tsx scripts/seed-fixture-stats.ts"
+    "db:seed-stats": "node --env-file=.env.local --import tsx scripts/seed-fixture-stats.ts",
+    "db:promote-admin": "node --env-file=.env.local --import tsx scripts/promote-admin.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

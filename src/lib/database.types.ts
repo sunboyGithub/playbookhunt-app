@@ -23,6 +23,41 @@ export type Database = {
   };
   public: {
     Tables: {
+      admin_actions: {
+        Row: {
+          action: string;
+          admin_id: string;
+          created_at: string;
+          id: string;
+          payload: NonNullable<Json>;
+          target: string;
+        };
+        Insert: {
+          action: string;
+          admin_id: string;
+          created_at?: string;
+          id?: string;
+          payload?: NonNullable<Json>;
+          target: string;
+        };
+        Update: {
+          action?: string;
+          admin_id?: string;
+          created_at?: string;
+          id?: string;
+          payload?: NonNullable<Json>;
+          target?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "admin_actions_admin_id_fkey";
+            columns: ["admin_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       agents: {
         Row: {
           capabilities: string[];
@@ -255,6 +290,7 @@ export type Database = {
           id: string;
           is_outlier: boolean;
           is_verified: boolean;
+          moderation_note: string | null;
           note: string | null;
           playbook_id: string;
           provider: string | null;
@@ -278,6 +314,7 @@ export type Database = {
           id?: string;
           is_outlier?: boolean;
           is_verified?: boolean;
+          moderation_note?: string | null;
           note?: string | null;
           playbook_id: string;
           provider?: string | null;
@@ -301,6 +338,7 @@ export type Database = {
           id?: string;
           is_outlier?: boolean;
           is_verified?: boolean;
+          moderation_note?: string | null;
           note?: string | null;
           playbook_id?: string;
           provider?: string | null;
@@ -432,31 +470,37 @@ export type Database = {
       playbook_requests: {
         Row: {
           created_at: string;
+          decided_at: string | null;
           email: string | null;
           id: string;
           pathname: string | null;
           purpose: string | null;
           query: string;
+          status: string;
           topic: string | null;
           user_id: string | null;
         };
         Insert: {
           created_at?: string;
+          decided_at?: string | null;
           email?: string | null;
           id?: string;
           pathname?: string | null;
           purpose?: string | null;
           query: string;
+          status?: string;
           topic?: string | null;
           user_id?: string | null;
         };
         Update: {
           created_at?: string;
+          decided_at?: string | null;
           email?: string | null;
           id?: string;
           pathname?: string | null;
           purpose?: string | null;
           query?: string;
+          status?: string;
           topic?: string | null;
           user_id?: string | null;
         };
@@ -849,6 +893,7 @@ export type Database = {
           id: string;
           kind: string;
           report_id: string;
+          review_note: string | null;
           review_status: string;
           storage_path: string;
         };
@@ -857,6 +902,7 @@ export type Database = {
           id?: string;
           kind: string;
           report_id: string;
+          review_note?: string | null;
           review_status?: string;
           storage_path: string;
         };
@@ -865,6 +911,7 @@ export type Database = {
           id?: string;
           kind?: string;
           report_id?: string;
+          review_note?: string | null;
           review_status?: string;
           storage_path?: string;
         };
@@ -1091,6 +1138,21 @@ export type Database = {
       };
     };
     Functions: {
+      admin_request_inbox: {
+        Args: { min_similarity?: number };
+        Returns: {
+          created_at: string;
+          decided_at: string;
+          email: string;
+          group_key: string;
+          id: string;
+          pathname: string;
+          purpose: string;
+          query: string;
+          status: string;
+          topic: string;
+        }[];
+      };
       is_admin: { Args: Record<PropertyKey, never>; Returns: boolean };
       owns_report: { Args: { p_report_id: string }; Returns: boolean };
       search_playbooks: {

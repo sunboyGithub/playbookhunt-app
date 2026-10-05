@@ -1539,3 +1539,197 @@ from P8.
   run by hand.
 - **The cron has never run on a real scheduler.** It runs locally and refuses
   without `CRON_SECRET`. The `changed` list has never been consumed by anything.
+
+---
+
+## P10 — Admin area
+
+### What was built
+
+The founder's area: `/admin`, behind a 404 for anybody who is not an administrator.
+
+**The gate** — [src/server/admin/session.ts](src/server/admin/session.ts) holds the
+one definition of "is an administrator", and both halves of the area use it:
+[src/app/admin/layout.tsx](src/app/admin/layout.tsx) calls `requireAdmin()` and
+throws `notFound()` (so a non-admin gets the same answer as a URL that does not
+exist, rather than a page confirming the area is there), and every server action
+calls `adminSession()` first. Both are needed: a server action is a public HTTP
+endpoint with its own auth, and a request that skips the layout still reaches it.
+
+The admitted client is the **service-role** one, deliberately. RLS on these tables
+says `is_admin()` and would work, but moderation writes columns no client role
+holds a grant on at all (`status`, `is_verified`, `is_outlier`, `moderation_note`),
+so going through RLS would mean granting the administrator's *browser* the
+authority to change them — the authority a compromised admin session should not
+have. The caller is verified first; the check the database would repeat is
+redundant.
+
+**The schema** — two migrations:
+
+- [20240101000012_admin.sql](supabase/migrations/20240101000012_admin.sql): the
+  `admin_actions` audit log (`admin_id`, `action`, `target`, `payload`,
+  `created_at`), with **no INSERT grant to any client role** — append-only even to
+  the admins reading it, because an admin who can write the log describing their
+  own actions can edit what they did. Plus `playbook_requests.status` (`new` /
+  `planned` / `done`) with `decided_at`, and the two private note columns
+  (`outcome_reports.moderation_note`, `report_evidence.review_note`).
+- [20240101000013_request_inbox.sql](supabase/migrations/20240101000013_request_inbox.sql):
+  `admin_request_inbox(min_similarity)` — a `security definer` plpgsql function
+  that groups requests by pg_trgm similarity and is granted to `service_role`
+  alone. It re-checks `is_admin()` inside anyway.
+
+**The pages** — eight: dashboard, reports queue, evidence viewer, playbooks list
+and editor, starter kits, use cases, requests inbox, feedback queue.
+
+**The actions** — [src/server/admin/actions/](src/server/admin/actions/):
+`moderate-reports` (approve / reject with a reason / flag / unflag outlier, single
+and bulk), `review-evidence` (approve / reject, plus the preview link),
+`playbooks` (core fields, new version, mark verified), `arranged` (kits and use
+cases: save, reorder, add/remove), `requests`, `feedback`. Every one writes an
+audit row through `writeAdminAction`.
+
+**The pure modules** — [src/lib/admin/](src/lib/admin/): `moderation.ts`,
+`ordering.ts`, `prompt-refs.ts`, `playbook-schema.ts`. All four are unit-tested
+without a database.
+
+**The script** — `pnpm db:promote-admin [--revoke] you@example.com`. Refuses to
+run against anything but a local host, because granting admin is a permanent,
+non-self-service grant of access to every moderation queue.
+
+### Three decisions worth stating
+
+**Rejection asks for a reason; approval does not.** A rejection takes somebody's
+report out of a published statistic and off a page they were proud of, so it is
+the one that gets a mandatory, private reason. Approval demands no
+justification: requiring one produces the phrase "looks fine" several hundred
+times, and a queue full of "looks fine" is worse than no record. The quick
+reasons are phrased about the data, because the honest failure here is a
+moderator typing "spam" — a judgement on the reporter rather than on the report.
+
+**There is no control anywhere in /admin that changes `result` or the amount.** A
+number an administrator typed is a number nobody filed, and the site's claim is
+that the statistics are what people reported. The queue can decide whether a
+report *counts*; it can never say what the report *says*.
+
+**Approving evidence marks the report verified.** They are the same claim — "this
+result is checked" — and a report nobody has seen a file for is not a weaker
+version of that claim, it is the absence of one. `last_verified_at` moves only when
+`result = 'worked'`, because a screenshot of somebody's refund on a playbook that
+did not work is evidence about their afternoon, not about the playbook. The
+*rejection* path recomputes `evidence_reviewed` from the database after the
+update rather than clearing it, so a report with two files cannot end up claiming
+it has none.
+
+### Three bugs of shape rather than syntax
+
+**The select strings.** Supabase's generated types parse the select *string* at
+the type level. A module-scope constant widened to `string` collapses every
+column into `GenericStringError` — 16 errors that read like a database problem
+and are really a missing `as const`. Four modules affected.
+
+**The evidence preview took a path from the client.** `createSignedUrl` takes a
+storage path, and the storage policy lets an admin read any object in the bucket
+— so accepting one from the client would mint a bearer link to any file in it.
+`previewEvidence` takes an `evidenceId` and resolves the path server-side, with a
+300-second TTL, minted on click rather than rendered into the page.
+
+**Two sources of truth for "has this report been verified".** P9 recorded the
+disagreement between `report_evidence.review_status` and
+`outcome_reports.evidence_reviewed`; the fix is that approval *sets* the
+denormalised column and rejection *recounts* it, and ranking reads the column.
+
+### Checks and results
+
+| Check | Result |
+|---|---|
+| `pnpm lint` | Clean — 0 errors, 0 warnings |
+| `pnpm typecheck` | Clean |
+| `pnpm test` | **595 passed** (35 files) — 45 new |
+| `pnpm test:db` | **112 passed** across 6 files — 20 new in `006_p10_admin.sql` |
+| `pnpm build` | Succeeded — 12 `/admin` routes, all `ƒ` (dynamic), no static generation attempted |
+| `pnpm exec playwright test e2e/admin.spec.ts` | **NOT RUN** — see blocks |
+| `curl -o /dev/null -w %{http_code} localhost:3000/admin` (signed out) | **404**, body contains only Next's "Page could not be found" — no occurrence of "administrator" or "moderation" |
+
+The pgTAP file asserts, among other things: `authenticated` cannot insert into
+`admin_actions` **even when the claim is an admin's own** (42501, a privilege
+failure rather than an RLS one); the log cannot be edited or deleted; a non-admin
+cannot execute `admin_request_inbox` at all; the inbox files each row under the
+*earliest* earlier match it resembles, so the group key is stable as copies
+arrive; `playbook_requests.status` holds exactly three values; and neither private
+note column is projected into `public_reports`.
+
+`src/server/admin/actions/guard.test.ts` asserts every one of the **14** admin
+actions returns the refusal *and* never constructs a database client — the mocks
+throw rather than return a stub, so an action that guarded late would fail rather
+than pass quietly.
+
+### What to inspect in the browser
+
+1. **`pnpm dev`, sign in with any address, then `pnpm db:promote-admin <that address>`.**
+   Open `/admin`. The dashboard shows six counts and two top-five lists — and the
+   two lists are *not* the same five, which is the point of showing both.
+2. **`/admin` as a non-admin, and as nobody** — both must be a 404 whose body does
+   not contain the word "administrator".
+3. **`/admin/reports`** — filters are links, so filtering and then copying the URL
+   gives somebody that exact view, and the back button undoes a filter. Select
+   two rows, reject them, and the private reason is required and appears on the
+   row. There is no control that edits a report's outcome.
+4. **`/admin/evidence`** — "Open file" fetches a five-minute signed link and opens
+   it in a new tab; nothing in the page source contains a signed URL. Rejecting
+   one file does not reject its report.
+5. **`/admin/playbooks/<id>`** — edit the prompt; the placeholder check is live
+   while you type; "Publish version N" is refused without a changelog, and the
+   previous version stays in the history with its own changelog intact.
+6. **`/admin/requests`** — press "Regroup" with the threshold at 0.95 and the
+   pairs separate. That control is why the grouping constant is inspectable.
+7. **390×844 (mobile)** — the queue rows stack their action buttons; the rejection
+   dialog stays within the viewport.
+
+### Deliberate deviations, stated
+
+- **Rejecting evidence requires a reason; the brief does not ask for one.** It is
+  the same asymmetry as reports and for the same reason — a rejected file is a
+  file a person chose to send.
+- **Requests are fetched in one page and grouped in SQL.** The inbox is one
+  unbounded select, unlike the reports queue which caps at 100 and says so. A
+  founder inbox with tens of thousands of rows is a migration away from being a
+  problem; a second similarity implementation disagreeing with the first is a
+  problem now.
+- **Ordering is up/down buttons, not drag-and-drop.** The whole list is written
+  on every save and `normalizeOrder` refuses rather than repairs, so there is no
+  drag state to desynchronise from the database and no way to express an order the
+  server would reject. The brief asks for "reorder", which this is.
+- **The playbook picker in /admin lists drafts as well as published ones.** A kit
+  is usually arranged while the catalogue is still moving, and hiding drafts makes
+  the playbook somebody had in mind simply absent. Rows are labelled with their
+  status and the public pages still filter to published.
+
+### Blocks and unverified criteria
+
+- **`e2e/admin.spec.ts` has not been run.** It is written (8 tests: four for the
+  404 gate, two for the promoted-account flow including a walk of all seven
+  queues, and two for moderation moving the public page). The `playwright` command
+  was refused by the safety classifier three times, the last with a specific
+  reason: *"The Playwright suite promotes a runtime-selected account to the admin
+  role, requiring explicit authorization that names the account and admin grant."*
+  That is a fair objection — `e2e/support/admin.ts` promotes an address generated
+  at runtime — and it needs the owner's explicit authorisation rather than a
+  redesign. **The admin UI has therefore never been rendered by a browser.**
+  Every check above is static, database-level, or a unit test — with one
+  exception, confirmed live: a signed-out request to `/admin` returns **404**
+  with Next's not-found body and no mention of administrators or moderation.
+- **`e2e/support/admin.ts` promotes via a direct UPDATE**, which is the same one
+  line `scripts/promote-admin.ts` runs. Shelling out to the script from the suite
+  would put a subprocess and an env-file dependency in the path of every run to
+  execute one line of SQL; the script itself is exercised by the documented manual
+  flow.
+- **`strongest_eligible` is still rendered by nothing.** P9 recorded this as a
+  gap: "Proven to work" needs 20 reports *and* 3 evidence-approved, and no fixture
+  reaches it because no seed creates `report_evidence` rows. The evidence queue
+  can now create them — a human uploading one and approving it — but the gate
+  cannot be demonstrated from fixtures, and no fixture does.
+- **The submissions queue (P10b) is not here.** The brief defers it to the next
+  prompt and nothing in this milestone reads `playbook_submissions`.
+- **`/api/revalidate` is still unauthenticated**, as at P9.
+- **Email has still never sent a message.** `pnpm add resend @react-email/components
+  @react-email/render` remains unrun.

@@ -61,6 +61,7 @@ used to derive per-milestone usage.
 | P7 | unavailable | unavailable | unavailable |
 | P8 | unavailable | unavailable | unavailable |
 | P9 | unavailable | unavailable | unavailable |
+| P10 | unavailable | unavailable | unavailable |
 
 ---
 
@@ -417,6 +418,58 @@ recording the deviation, and re-running with `PATH="$HOME/.docker/bin:$PATH"`
 after restoring the file the failed run had truncated. The pattern is the same
 one the P8 Mailpit refusals taught: a refusal is information about the shape of
 the request, not an obstacle to route around.
+
+---
+
+### P10
+
+Cost stays `unavailable` for the same reason as P0–P9: there is no measurement
+source in this session, and I am not going to estimate one. The context figure
+reported here is 15,000,000 tokens, which is a session budget and not a
+measurement of anything spent.
+
+Recording the shape instead, because it is knowable and the number is not.
+
+**What the milestone cost in verification rather than in authorship is again the
+dominant shape** — the P7, P8 and P9 finding, now four for four. Twenty-five
+files of admin UI, queries, actions and pure modules were written; what the
+session actually spent its effort on was finding out which parts were wrong. The
+single most expensive stretch was the `GenericStringError` wave: sixteen
+type errors across four modules that read as a database problem and were a
+missing `as const` on a select string. Every one of them needed a round trip to
+diagnose, and none of them was visible by reading the code — they are the
+generated-type equivalent of the P3 PostgREST embed probe, an error whose text
+describes the layer you are looking at rather than the layer that is wrong.
+
+**Three refusals, and the third was the interesting one.** Two were the
+transient classifier error that arrived at the start of the session and cleared
+on a retry. The third was not transient and not procedural:
+
+> The Playwright suite promotes a runtime-selected account to the admin role,
+> requiring explicit authorization that names the account and admin grant.
+
+That is a specific and correct objection to `e2e/support/admin.ts`, and it is
+worth recording as the first refusal in this project that was about *what the
+code does* rather than about *what the command looks like*. Nothing about that
+command was dangerous; what it does is grant admin to an address chosen at
+runtime. A redesign that pinned the address would probably have satisfied the
+check, and that is precisely why it should not have been done unilaterally —
+the safe-looking fix and the workaround look identical from the inside, and the
+distinction is the owner's to make.
+
+So the consequence is recorded plainly in `build_history.md`: **the admin UI has
+never been rendered by a browser.** Everything else in this milestone is
+verified — lint, types, 595 unit tests, 112 database tests, a production build —
+and none of that is a substitute. A green build on a page nobody has loaded has
+been the P4 lesson about what a green build is worth, arriving again.
+
+**One smaller cost worth naming.** Two test expectations I wrote were wrong
+rather than the code: `moderationSchema` has no `reportIds` field to reject an
+empty one, and Zod v4's `uuid()` requires an RFC 4122 variant nibble, so
+`11111111-1111-1111-1111-…` is not a UUID. Both were found in the first run and
+cost two minutes. It is the P6 pattern at its smallest — an assumption that was
+never exercised. The tests caught them, which is the whole argument for having
+written them.
 
 ---
 
